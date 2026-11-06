@@ -1,31 +1,73 @@
+
 using OpenTK.Mathematics;
 
 namespace CrystalDefense.Core;
 
-// The playable rectangle of the arena on the floor (X = left/right, Z = forward/backward).
-// SHARED FILE: the arena (Manuela) provides the real values; the others only read them.
+// Circular playable area of the arena.
+// The center is on the X/Z floor plane.
 public sealed class ArenaBounds
 {
-    public ArenaBounds(float minX, float maxX, float minZ, float maxZ)
+    public ArenaBounds(Vector2 center, float radius)
     {
-        MinX = minX;
-        MaxX = maxX;
-        MinZ = minZ;
-        MaxZ = maxZ;
+        if (radius <= 0)
+            throw new ArgumentOutOfRangeException(nameof(radius));
+
+        Center = center;
+        Radius = radius;
     }
 
-    public float MinX { get; }
-    public float MaxX { get; }
-    public float MinZ { get; }
-    public float MaxZ { get; }
+    public Vector2 Center { get; }
 
-    // true if the point is inside the arena (the height Y does not matter).
-    public bool Contains(Vector3 point) =>
-        point.X >= MinX && point.X <= MaxX && point.Z >= MinZ && point.Z <= MaxZ;
+    // Actual playable radius, measured from the center to the inner wall.
+    public float Radius { get; }
 
-    // Moves a point back into the arena. The margin keeps an object of this radius away from the walls.
-    public Vector3 Clamp(Vector3 point, float margin) => new(
-        Math.Clamp(point.X, MinX + margin, MaxX - margin),
-        point.Y,
-        Math.Clamp(point.Z, MinZ + margin, MaxZ - margin));
+    // Checks whether a point is inside the circular arena.
+    public bool Contains(Vector3 point, float margin = 0.0f)
+    {
+        float allowedRadius = Radius - margin;
+
+        if (allowedRadius < 0)
+            return false;
+
+        float dx = point.X - Center.X;
+        float dz = point.Z - Center.Y;
+
+        float distanceSquared = dx * dx + dz * dz;
+
+        return distanceSquared <= allowedRadius * allowedRadius;
+    }
+
+    // Keeps the complete object inside the circular arena.
+    public Vector3 Clamp(Vector3 point, float margin)
+    {
+        float allowedRadius = Radius - margin;
+
+        if (allowedRadius < 0)
+            throw new ArgumentOutOfRangeException(nameof(margin));
+
+        float dx = point.X - Center.X;
+        float dz = point.Z - Center.Y;
+
+        float distanceSquared = dx * dx + dz * dz;
+        float allowedRadiusSquared = allowedRadius * allowedRadius;
+
+        // The point is already inside the playable circle.
+        if (distanceSquared <= allowedRadiusSquared)
+            return point;
+
+        // Avoid division by zero.
+        if (distanceSquared == 0)
+            return point;
+
+        // Normalize the direction and place the player on the circle.
+        float distance = MathF.Sqrt(distanceSquared);
+
+        float scale = allowedRadius / distance;
+
+        return new Vector3(
+            Center.X + dx * scale,
+            point.Y,
+            Center.Y + dz * scale
+        );
+    }
 }

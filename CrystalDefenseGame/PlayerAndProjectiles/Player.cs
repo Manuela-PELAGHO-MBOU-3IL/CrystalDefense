@@ -1,3 +1,4 @@
+
 using CrystalDefense.Core;
 using Engine.Materials;
 using Engine.OpenGL;
@@ -6,42 +7,73 @@ using OpenTK.Windowing.GraphicsLibraryFramework;
 
 namespace CrystalDefense.PlayerAndProjectiles;
 
-// The character controlled by the player: W/A/S/D moves it on the floor, it cannot leave the arena.
 public sealed class Player : GameObject
 {
-    public Player(Mesh mesh, Material material, Vector3 startPosition, float radius)
-        : base(mesh, material, startPosition, radius) { }
+    public Player(
+        Mesh mesh,
+        Material material,
+        Vector3 startPosition,
+        float radius
+    ) : base(mesh, material, startPosition, radius) { }
 
-    // Speed in units per second.
     public float Speed { get; set; } = 6.0f;
 
-    // The direction the player looks at (length 1). Projectiles are shot in this direction.
-    // At the start the player looks along -Z, that is "forward" (away from the camera).
     public Vector3 FacingDirection { get; private set; } = -Vector3.UnitZ;
 
-    public void Update(KeyboardState keyboard, float deltaTime, ArenaBounds bounds)
+    public void Update(
+        KeyboardState keyboard,
+        float deltaTime,
+        ArenaBounds bounds,
+        Vector3 obstacleCenter,
+        float obstacleRadius
+    )
     {
-        // 1. Read the keys and build the direction of the movement on the floor (X and Z).
         Vector3 direction = Vector3.Zero;
-        if (keyboard.IsKeyDown(Keys.W)) direction.Z -= 1;   // forward
-        if (keyboard.IsKeyDown(Keys.S)) direction.Z += 1;   // backward
-        if (keyboard.IsKeyDown(Keys.A)) direction.X -= 1;   // left
-        if (keyboard.IsKeyDown(Keys.D)) direction.X += 1;   // right
 
-        if (direction != Vector3.Zero)
-        {
-            // 2. Length 1, so that moving diagonally is not faster.
-            direction = direction.Normalized();
+        if (keyboard.IsKeyDown(Keys.W)) direction.Z -= 1;
+        if (keyboard.IsKeyDown(Keys.S)) direction.Z += 1;
+        if (keyboard.IsKeyDown(Keys.A)) direction.X -= 1;
+        if (keyboard.IsKeyDown(Keys.D)) direction.X += 1;
 
-            // 3. Move: speed × time since the last frame = same speed on every computer.
-            Position += direction * Speed * deltaTime;
+        if (direction == Vector3.Zero)
+            return;
 
-            // 4. Remember where the player looks and turn the model in that direction.
-            FacingDirection = direction;
-            RotationY = MathF.Atan2(-direction.X, -direction.Z);
-        }
+        direction = direction.Normalized();
 
-        // 5. Stay inside the arena.
-        Position = bounds.Clamp(Position, Radius);
+        FacingDirection = direction;
+        RotationY = MathF.Atan2(-direction.X, -direction.Z);
+
+        float movement = Speed * deltaTime;
+
+        // Move horizontally first.
+        Vector3 nextX = Position;
+        nextX.X += direction.X * movement;
+        nextX = bounds.Clamp(nextX, Radius);
+
+        if (!OverlapsObstacle(nextX, obstacleCenter, obstacleRadius))
+            Position = nextX;
+
+        // Move vertically on the floor (Z axis) separately.
+        Vector3 nextZ = Position;
+        nextZ.Z += direction.Z * movement;
+        nextZ = bounds.Clamp(nextZ, Radius);
+
+        if (!OverlapsObstacle(nextZ, obstacleCenter, obstacleRadius))
+            Position = nextZ;
+    }
+
+    private bool OverlapsObstacle(
+        Vector3 playerPosition,
+        Vector3 obstacleCenter,
+        float obstacleRadius
+    )
+    {
+        float dx = playerPosition.X - obstacleCenter.X;
+        float dz = playerPosition.Z - obstacleCenter.Z;
+
+        float minimumDistance = Radius + obstacleRadius;
+
+        return dx * dx + dz * dz <
+               minimumDistance * minimumDistance;
     }
 }
