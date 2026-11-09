@@ -198,31 +198,41 @@ internal sealed class CrystalDefenseWindow : Application
         // SARAH - PLAYER
         // =================================================
 
+        // Low-poly knight modelled in Blender (source: Blender/knight.blend).
+        // His feet are at y = 0 (the arena floor) and he looks along -Z.
+        // All his colors come from one small texture with one color cell per part.
         var playerMesh = Keep(
-            new Mesh(Primitives.CreateCube(1.0f))
+            new Mesh(ObjLoader.Load(Path.Combine(
+                AppContext.BaseDirectory, "Assets", "knight.obj")))
         );
 
         var playerMaterial =
             new AmbientDiffuseSpecularMaterial(
-                Keep(LoadTexture("player.png"))
+                Keep(LoadTexture("knight_palette.png"))
             )
             {
-                Shininess = 32.0f
+                Shininess = 48.0f
             };
 
         _player = new Player(
             playerMesh,
             playerMaterial,
-            new Vector3(0.0f, 0.5f, 5.0f),
-            radius: 0.5f
-        );
+            new Vector3(0.0f, 0.0f, 6.0f),
+            radius: 0.45f
+        )
+        {
+            Scale = 1.2f
+        };
 
         // =================================================
         // SARAH - PROJECTILES
         // =================================================
 
+        // Small low-poly energy orb modelled in Blender (source: Blender/projectile.blend).
+        // Unlit, so that it always looks bright.
         var projectileMesh = Keep(
-            new Mesh(Primitives.CreateCube(0.3f))
+            new Mesh(ObjLoader.Load(Path.Combine(
+                AppContext.BaseDirectory, "Assets", "projectile.obj")))
         );
 
         var projectileMaterial =
@@ -233,7 +243,11 @@ internal sealed class CrystalDefenseWindow : Application
         _projectiles = new ProjectileManager(
             projectileMesh,
             projectileMaterial
-        );
+        )
+        {
+            // Middle height of the enemies (they are 1 unit high, standing on the floor).
+            ShootingHeight = 0.6f
+        };
 
         // =================================================
         // ONS - ENEMIES
