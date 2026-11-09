@@ -50,6 +50,7 @@ public abstract class GameObject
     public Matrix4 ModelMatrix =>
         Matrix4.CreateScale(Scale) * Matrix4.CreateRotationY(RotationY) * Matrix4.CreateTranslation(Position);
 
-    public void Draw(OpenGlRenderer renderer, Camera camera) =>
+    // virtual: a derived class can draw itself differently (the player draws a knight made of several parts).
+    public virtual void Draw(OpenGlRenderer renderer, Camera camera) =>
         renderer.Draw(Mesh, Material, ModelMatrix, camera);
 }

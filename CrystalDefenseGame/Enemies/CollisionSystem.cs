@@ -139,4 +139,70 @@ public sealed class CollisionSystem
             // The enemy stays alive until the player kills it.
         }
     }
+
+    // =====================================================
+    // PLAYER SWORD - ENEMY COLLISIONS (added by Sarah)
+    // =====================================================
+
+    // In the middle of a sword slash, every enemy in a cone in front of the knight takes damage.
+    public void CheckSwordEnemyCollisions(
+        Player player,
+        IReadOnlyList<Enemy> enemies
+    )
+    {
+        if (!player.ConsumeSwordStrike())
+            return;
+
+        float minimumCos = MathF.Cos(
+            MathHelper.DegreesToRadians(Player.SwordHalfAngleDegrees)
+        );
+
+        foreach (Enemy enemy in enemies)
+        {
+            if (!enemy.IsAlive)
+                continue;
+
+            // Horizontal vector from the knight to the enemy.
+            Vector3 toEnemy = enemy.Position - player.Position;
+            toEnemy.Y = 0.0f;
+            float distance = toEnemy.Length;
+
+            if (distance > Player.SwordReach + enemy.Radius)
+                continue;
+
+            // Is the enemy in front of the knight? (dot product = cosine of the angle)
+            if (distance > 0.001f &&
+                Vector3.Dot(toEnemy / distance, player.FacingDirection) < minimumCos)
+                continue;
+
+            enemy.TakeDamage(Player.SwordDamage);
+
+            Console.WriteLine(
+                $"Sword hit enemy! Enemy HP: {enemy.Health}"
+            );
+        }
+    }
+
+    // =====================================================
+    // ENEMY - PLAYER COLLISIONS (added by Sarah)
+    // =====================================================
+
+    // An enemy that touches the knight hurts him (he is then invincible for a moment).
+    public void CheckEnemyPlayerCollisions(
+        IReadOnlyList<Enemy> enemies,
+        Player player
+    )
+    {
+        if (!player.CanAct)
+            return;
+
+        foreach (Enemy enemy in enemies)
+        {
+            if (enemy.IsAlive && enemy.CollidesWith(player))
+            {
+                player.TakeDamage(1);
+                return;
+            }
+        }
+    }
 }

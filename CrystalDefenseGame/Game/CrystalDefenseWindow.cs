@@ -58,6 +58,9 @@ internal sealed class CrystalDefenseWindow : Application
 
     private Player _player = null!;
     private ProjectileManager _projectiles = null!;
+    private OrbitCamera _orbitCamera = null!;
+    private readonly PlayerInput _input = new();
+    private string _hudTitle = "";
 
     // =====================================================
     // ONS - ENEMIES AND COLLISIONS
@@ -198,15 +201,10 @@ internal sealed class CrystalDefenseWindow : Application
         // SARAH - PLAYER
         // =================================================
 
-        // Low-poly knight modelled in Blender (source: Blender/knight.blend).
-        // His feet are at y = 0 (the arena floor) and he looks along -Z.
-        // All his colors come from one small texture with one color cell per part.
-        var playerMesh = Keep(
-            new Mesh(ObjLoader.Load(Path.Combine(
-                AppContext.BaseDirectory, "Assets", "knight.obj")))
-        );
-
-        var playerMaterial =
+        // Low-poly knight modelled in Blender (source: Blender/knight.blend), made of five parts
+        // that are animated as a scene graph (see KnightModel). His feet are at y = 0 (the arena floor)
+        // and he looks along -Z. All his colors come from one small texture with one color cell per part.
+        var knightMaterial =
             new AmbientDiffuseSpecularMaterial(
                 Keep(LoadTexture("knight_palette.png"))
             )
@@ -214,15 +212,34 @@ internal sealed class CrystalDefenseWindow : Application
                 Shininess = 48.0f
             };
 
+        Mesh knightBody = LoadKnightPart("knight_body.obj");
+
+        var knightModel = new KnightModel(
+            knightBody,
+            LoadKnightPart("knight_leg_right.obj"),
+            LoadKnightPart("knight_leg_left.obj"),
+            LoadKnightPart("knight_arm_right.obj"),
+            LoadKnightPart("knight_arm_left.obj"),
+            LoadKnightPart("knight_cape.obj"),
+            knightMaterial
+        );
+
         _player = new Player(
-            playerMesh,
-            playerMaterial,
+            knightModel,
+            knightBody,
+            knightMaterial,
             new Vector3(0.0f, 0.0f, 6.0f),
             radius: 0.45f
         )
         {
-            Scale = 1.2f
+            Scale = 0.9f   // the model is about 1.95 high in Blender: 1.75 in the game
         };
+
+        // Third-person camera: follows the knight closely, can be turned and zoomed.
+        _orbitCamera = new OrbitCamera(
+            _camera,
+            _player.Position
+        );
 
         // =================================================
         // SARAH - PROJECTILES
@@ -390,8 +407,20 @@ internal sealed class CrystalDefenseWindow : Application
         // SARAH - PLAYER
         // =================================================
 
-        _player.Update(
+        // Keyboard only or keyboard + mouse: PlayerInput turns the keys and the mouse into actions.
+        _input.Read(
             KeyboardState,
+            MouseState,
+            ClientSize,
+            _orbitCamera,
+            _player.Position,
+            _projectiles.ShootingHeight,
+            _enemySpawner.Enemies,
+            deltaTime
+        );
+
+        _player.Update(
+            _input,
             deltaTime,
             _arenaBounds,
             _crystal.Position,
@@ -403,7 +432,7 @@ internal sealed class CrystalDefenseWindow : Application
         // =================================================
 
         _projectiles.Update(
-            KeyboardState,
+            _input.IsShooting,
             deltaTime,
             _player,
             _arenaBounds
@@ -450,8 +479,38 @@ internal sealed class CrystalDefenseWindow : Application
             deltaTime
         );
 
+        // =================================================
+        // SARAH - SWORD AND DAMAGE TO THE PLAYER
+        // =================================================
+
+        _collisionSystem.CheckSwordEnemyCollisions(
+            _player,
+            _enemySpawner.Enemies
+        );
+
+        _collisionSystem.CheckEnemyPlayerCollisions(
+            _enemySpawner.Enemies,
+            _player
+        );
+
         // Remove defeated enemies.
         _enemySpawner.RemoveDeadEnemies();
+
+        // =================================================
+        // SARAH - CAMERA AND PLAYER INFO
+        // =================================================
+
+        if (_player.WasHitThisFrame)
+            _orbitCamera.Shake(0.35f);
+
+        _orbitCamera.Update(
+            deltaTime,
+            KeyboardState,
+            MouseState,
+            _player.Position
+        );
+
+        UpdatePlayerInfoInTitle();
 
         // =================================================
         // MANUELA - GAME STATE
@@ -544,6 +603,37 @@ internal sealed class CrystalDefenseWindow : Application
 
         _crystalHealthBar.Dispose();
         _renderer.Dispose();
+    }
+
+    // =====================================================
+    // SARAH - HELPERS
+    // =====================================================
+
+    private Mesh LoadKnightPart(string fileName) =>
+        Keep(new Mesh(ObjLoader.Load(Path.Combine(
+            AppContext.BaseDirectory, "Assets", "Knight", fileName))));
+
+    // Temporary player HUD in the window title, until the game has a real interface.
+    private void UpdatePlayerInfoInTitle()
+    {
+        string health = _player.IsKnockedOut
+            ? "KNOCKED OUT"
+            : new string('#', _player.Health) + new string('-', Player.MaxHealth - _player.Health);
+
+        string controls = _input.Mode == PlayerInput.AimMode.Mouse
+            ? "Mouse: left click shoot, right click sword"
+            : "Keyboard: arrows shoot, Enter/K sword";
+
+        string title =
+            $"Crystal Defense  |  Knight [{health}]  |  Dash {(_player.IsDashReady ? "ready" : "...")}" +
+            $"  |  {controls}  |  WASD move, Space dash, Q/E turn camera, R/F zoom";
+
+        // Changing the title is slow on some systems, so only do it when the text changes.
+        if (title != _hudTitle)
+        {
+            _hudTitle = title;
+            Title = title;
+        }
     }
 
     // =====================================================

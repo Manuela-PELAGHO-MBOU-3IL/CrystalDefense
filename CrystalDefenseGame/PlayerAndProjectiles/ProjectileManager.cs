@@ -3,11 +3,10 @@ using Engine;
 using Engine.Materials;
 using Engine.OpenGL;
 using OpenTK.Mathematics;
-using OpenTK.Windowing.GraphicsLibraryFramework;
 
 namespace CrystalDefense.PlayerAndProjectiles;
 
-// Creates the projectiles when the player shoots (Space), moves them and removes the destroyed ones.
+// Creates the projectiles when the player shoots (left mouse button), moves them and removes the destroyed ones.
 public sealed class ProjectileManager
 {
     private readonly List<Projectile> _projectiles = new();
@@ -33,15 +32,15 @@ public sealed class ProjectileManager
     // Read-only access for the collision system (Ons): it calls Destroy() on the projectiles that hit an enemy.
     public IReadOnlyList<Projectile> Projectiles => _projectiles;
 
-    public void Update(KeyboardState keyboard, float deltaTime, Player player, ArenaBounds bounds)
+    public void Update(bool isShooting, float deltaTime, Player player, ArenaBounds bounds)
     {
         // 1. Remove the projectiles destroyed during the last frame (hit an enemy or left the arena).
         //    This is done before the loop below: a list must not change while it is being walked through.
         _projectiles.RemoveAll(projectile => !projectile.IsAlive);
 
-        // 2. Shoot while Space is held down, but at most once per Cooldown.
+        // 2. Shoot while the button is held down, but at most once per Cooldown (not while knocked out).
         _cooldownTimer -= deltaTime;
-        if (keyboard.IsKeyDown(Keys.Space) && _cooldownTimer <= 0)
+        if (isShooting && player.CanAct && _cooldownTimer <= 0)
         {
             Shoot(player);
             _cooldownTimer = Cooldown;
