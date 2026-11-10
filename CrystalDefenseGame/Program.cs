@@ -1,3 +1,4 @@
+
 using CrystalDefense.Game;
 using OpenTK.Mathematics;
 using OpenTK.Windowing.Common;
@@ -17,7 +18,11 @@ internal static class Program
             Profile = ContextProfile.Core
         };
 
-        using var window = new CrystalDefenseWindow(GameWindowSettings.Default, windowSettings);
+        using var window = new CrystalDefenseWindow(
+            GameWindowSettings.Default,
+            windowSettings
+        );
+
         window.Run();
     }
 }

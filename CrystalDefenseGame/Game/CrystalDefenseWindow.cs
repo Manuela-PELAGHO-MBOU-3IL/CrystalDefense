@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 
+using CrystalDefenseGame.Enemies;
 using CrystalDefense.Core;
 using CrystalDefense.PlayerAndProjectiles;
 using CrystalDefense.Game.UI;
@@ -36,7 +37,7 @@ internal sealed class CrystalDefenseWindow : Application
     private readonly List<IDisposable> _resources = new();
 
     // =====================================================
-    // MANUELA - ARENA
+    // MANUELA - ARENA AND CRYSTAL
     // =====================================================
 
     private ArenaBounds _arenaBounds = null!;
@@ -57,6 +58,17 @@ internal sealed class CrystalDefenseWindow : Application
 
     private Player _player = null!;
     private ProjectileManager _projectiles = null!;
+    private OrbitCamera _orbitCamera = null!;
+    private readonly PlayerInput _input = new();
+    private string _hudTitle = "";
+
+    // =====================================================
+    // ONS - ENEMIES AND COLLISIONS
+    // =====================================================
+
+    private EnemySpawner _enemySpawner = null!;
+    private EnemyWaveManager _enemyWaveManager = null!;
+    private CollisionSystem _collisionSystem = null!;
 
     // =====================================================
     // CONSTRUCTOR
@@ -86,7 +98,7 @@ internal sealed class CrystalDefenseWindow : Application
             new Vector3(0.0f, 0.0f, 1.0f)
         );
 
-        // Lighting - Blinn-Phong
+        // Lighting
         _renderer.DirectionalLight = new DirectionalLight
         {
             Direction = new Vector3(-1.0f, 1.7f, 1.0f),
@@ -104,7 +116,6 @@ internal sealed class CrystalDefenseWindow : Application
             11.5f
         );
 
-        // Load static arena objects.
         LoadArenaObject(
             "Arena_Stone.obj",
             "stone_color.png",
@@ -169,14 +180,14 @@ internal sealed class CrystalDefenseWindow : Application
             );
         }
 
-        var crystalMaterial = new AmbientDiffuseSpecularMaterial(
-            Keep(Texture.FromFile(crystalTexturePath))
-        )
-        {
-            Shininess = 562.5f
-        };
+        var crystalMaterial =
+            new AmbientDiffuseSpecularMaterial(
+                Keep(Texture.FromFile(crystalTexturePath))
+            )
+            {
+                Shininess = 562.5f
+            };
 
-        // Collision zone of the crystal and pedestal.
         _crystal = new CrystalEntity(
             crystalMesh,
             crystalMaterial,
@@ -190,42 +201,109 @@ internal sealed class CrystalDefenseWindow : Application
         // SARAH - PLAYER
         // =================================================
 
-        var playerMesh = Keep(
-            new Mesh(Primitives.CreateCube(1.0f))
+        // Low-poly knight modelled in Blender (source: Blender/knight.blend), made of five parts
+        // that are animated as a scene graph (see KnightModel). His feet are at y = 0 (the arena floor)
+        // and he looks along -Z. All his colors come from one small texture with one color cell per part.
+        var knightMaterial =
+            new AmbientDiffuseSpecularMaterial(
+                Keep(LoadTexture("knight_palette.png"))
+            )
+            {
+                Shininess = 48.0f
+            };
+
+        Mesh knightBody = LoadKnightPart("knight_body.obj");
+
+        var knightModel = new KnightModel(
+            knightBody,
+            LoadKnightPart("knight_leg_right.obj"),
+            LoadKnightPart("knight_leg_left.obj"),
+            LoadKnightPart("knight_arm_right.obj"),
+            LoadKnightPart("knight_arm_left.obj"),
+            LoadKnightPart("knight_cape.obj"),
+            knightMaterial
         );
 
-        var playerMaterial = new AmbientDiffuseSpecularMaterial(
-            Keep(LoadTexture("player.png"))
+        _player = new Player(
+            knightModel,
+            knightBody,
+            knightMaterial,
+            new Vector3(0.0f, 0.0f, 6.0f),
+            radius: 0.45f
         )
         {
-            Shininess = 32.0f
+            Scale = 0.9f   // the model is about 1.95 high in Blender: 1.75 in the game
         };
 
-        _player = new Player(
-            playerMesh,
-            playerMaterial,
-            new Vector3(0.0f, 0.5f, 5.0f),
-            radius: 0.5f
+        // Third-person camera: follows the knight closely, can be turned and zoomed.
+        _orbitCamera = new OrbitCamera(
+            _camera,
+            _player.Position
         );
 
         // =================================================
         // SARAH - PROJECTILES
         // =================================================
 
+        // Small low-poly energy orb modelled in Blender (source: Blender/projectile.blend).
+        // Unlit, so that it always looks bright.
         var projectileMesh = Keep(
-            new Mesh(Primitives.CreateCube(0.3f))
+            new Mesh(ObjLoader.Load(Path.Combine(
+                AppContext.BaseDirectory, "Assets", "projectile.obj")))
         );
 
-        var projectileMaterial = new UnlitTextureMaterial(
-            Keep(LoadTexture("projectile.png"))
-        );
+        var projectileMaterial =
+            new UnlitTextureMaterial(
+                Keep(LoadTexture("projectile.png"))
+            );
 
         _projectiles = new ProjectileManager(
             projectileMesh,
             projectileMaterial
+        )
+        {
+            // Middle height of the enemies (they are 1 unit high, standing on the floor).
+            ShootingHeight = 0.6f
+        };
+
+        // =================================================
+        // ONS - ENEMIES
+        // =================================================
+
+        // Temporary cube model.
+        // The Crystal Golem will replace it later.
+        var enemyMesh = Keep(
+            new Mesh(Primitives.CreateCube(1.0f))
         );
 
-        Console.WriteLine("Crystal Defense initialized.");
+        var enemyMaterial =
+            new AmbientDiffuseSpecularMaterial(
+                Keep(LoadTexture("player.png"))
+            )
+            {
+                Shininess = 32.0f
+            };
+
+        // Improved enemy spawner:
+        // Different positions and speeds.
+        _enemySpawner = new EnemySpawner(
+            enemyMesh,
+            enemyMaterial
+        );
+
+        // Projectile and crystal collisions.
+        _collisionSystem = new CollisionSystem();
+
+        // Wave management.
+        _enemyWaveManager = new EnemyWaveManager(
+            _enemySpawner
+        );
+
+        _enemyWaveManager.Start();
+
+        Console.WriteLine(
+            "Crystal Defense initialized."
+        );
 
         Console.WriteLine(
             $"Crystal health: {_crystal.Health}/{CrystalEntity.MaxHealth}"
@@ -233,7 +311,7 @@ internal sealed class CrystalDefenseWindow : Application
     }
 
     // =====================================================
-    // LOAD ONE STATIC ARENA OBJECT
+    // LOAD ARENA OBJECT
     // =====================================================
 
     private void LoadArenaObject(
@@ -278,12 +356,13 @@ internal sealed class CrystalDefenseWindow : Application
             );
         }
 
-        var material = new AmbientDiffuseSpecularMaterial(
-            Keep(Texture.FromFile(texturePath))
-        )
-        {
-            Shininess = shininess
-        };
+        var material =
+            new AmbientDiffuseSpecularMaterial(
+                Keep(Texture.FromFile(texturePath))
+            )
+            {
+                Shininess = shininess
+            };
 
         _arenaObjects.Add((
             mesh,
@@ -324,31 +403,123 @@ internal sealed class CrystalDefenseWindow : Application
         if (_gameState.IsGameOver)
             return;
 
-        // Sarah - Player.
-        _player.Update(
+        // =================================================
+        // SARAH - PLAYER
+        // =================================================
+
+        // Keyboard only or keyboard + mouse: PlayerInput turns the keys and the mouse into actions.
+        _input.Read(
             KeyboardState,
+            MouseState,
+            ClientSize,
+            _orbitCamera,
+            _player.Position,
+            _projectiles.ShootingHeight,
+            _enemySpawner.Enemies,
+            deltaTime
+        );
+
+        _player.Update(
+            _input,
             deltaTime,
             _arenaBounds,
             _crystal.Position,
             _crystal.Radius
         );
 
-        // Sarah - Projectiles.
+        // =================================================
+        // SARAH - PROJECTILES
+        // =================================================
+
         _projectiles.Update(
-            KeyboardState,
+            _input.IsShooting,
             deltaTime,
             _player,
             _arenaBounds
         );
 
-        // Ons - Enemies and collisions.
-        // Enemy damage will be connected here.
+        // =================================================
+        // ONS - ENEMY WAVES
+        // =================================================
 
-        // Manuela - Game state.
-        // Waiting for Ons's wave system.
+        // Manage the current wave.
+        _enemyWaveManager.Update(deltaTime);
+
+        // =================================================
+        // ONS - ENEMY MOVEMENT
+        // =================================================
+
+        // Enemies move toward the crystal.
+        // Different spawn positions and speeds.
+        // Separation is handled inside EnemySpawner.
+        _enemySpawner.Update(
+            deltaTime,
+            _crystal.Position,
+            _crystal.Radius
+        );
+
+        // =================================================
+        // ONS - PROJECTILE COLLISIONS
+        // =================================================
+
+        _collisionSystem.CheckProjectileEnemyCollisions(
+            _enemySpawner.Enemies,
+            _projectiles.Projectiles
+        );
+
+        // =================================================
+        // ONS - CRYSTAL COLLISIONS
+        // =================================================
+
+        // Each enemy attacks every 3 seconds.
+        // Enemies stay alive until defeated.
+        _collisionSystem.CheckEnemyCrystalCollisions(
+            _enemySpawner.Enemies,
+            _crystal,
+            deltaTime
+        );
+
+        // =================================================
+        // SARAH - SWORD AND DAMAGE TO THE PLAYER
+        // =================================================
+
+        _collisionSystem.CheckSwordEnemyCollisions(
+            _player,
+            _enemySpawner.Enemies
+        );
+
+        _collisionSystem.CheckEnemyPlayerCollisions(
+            _enemySpawner.Enemies,
+            _player
+        );
+
+        // Remove defeated enemies.
+        _enemySpawner.RemoveDeadEnemies();
+
+        // =================================================
+        // SARAH - CAMERA AND PLAYER INFO
+        // =================================================
+
+        if (_player.WasHitThisFrame)
+            _orbitCamera.Shake(0.35f);
+
+        _orbitCamera.Update(
+            deltaTime,
+            KeyboardState,
+            MouseState,
+            _player.Position
+        );
+
+        UpdatePlayerInfoInTitle();
+
+        // =================================================
+        // MANUELA - GAME STATE
+        // =================================================
+
         _gameState.Update(
             _crystal,
-            allWavesCompleted: false
+            allWavesCompleted:
+                _enemyWaveManager.AllWavesCompleted
         );
     }
 
@@ -360,7 +531,10 @@ internal sealed class CrystalDefenseWindow : Application
     {
         _renderer.Clear();
 
-        // Manuela - Static Blender arena objects.
+        // =================================================
+        // MANUELA - ARENA
+        // =================================================
+
         foreach (var arenaObject in _arenaObjects)
         {
             _renderer.Draw(
@@ -371,26 +545,49 @@ internal sealed class CrystalDefenseWindow : Application
             );
         }
 
-        // Manuela - Crystal.
+        // =================================================
+        // MANUELA - CRYSTAL
+        // =================================================
+
         _crystal.Draw(
             _renderer,
             _camera
         );
 
-        // Sarah - Player.
+        // =================================================
+        // SARAH - PLAYER
+        // =================================================
+
         _player.Draw(
             _renderer,
             _camera
         );
 
-        // Sarah - Projectiles.
+        // =================================================
+        // SARAH - PROJECTILES
+        // =================================================
+
         _projectiles.Draw(
             _renderer,
             _camera
         );
 
-        // Manuela - Crystal health bar (2D HUD).
-        _crystalHealthBar.Draw(_crystal.HealthPercentage);
+        // =================================================
+        // ONS - ENEMIES
+        // =================================================
+
+        _enemySpawner.Draw(
+            _renderer,
+            _camera
+        );
+
+        // =================================================
+        // MANUELA - CRYSTAL HEALTH BAR
+        // =================================================
+
+        _crystalHealthBar.Draw(
+            _crystal.HealthPercentage
+        );
     }
 
     // =====================================================
@@ -409,10 +606,43 @@ internal sealed class CrystalDefenseWindow : Application
     }
 
     // =====================================================
+    // SARAH - HELPERS
+    // =====================================================
+
+    private Mesh LoadKnightPart(string fileName) =>
+        Keep(new Mesh(ObjLoader.Load(Path.Combine(
+            AppContext.BaseDirectory, "Assets", "Knight", fileName))));
+
+    // Temporary player HUD in the window title, until the game has a real interface.
+    private void UpdatePlayerInfoInTitle()
+    {
+        string health = _player.IsKnockedOut
+            ? "KNOCKED OUT"
+            : new string('#', _player.Health) + new string('-', Player.MaxHealth - _player.Health);
+
+        string controls = _input.Mode == PlayerInput.AimMode.Mouse
+            ? "Mouse: left click shoot, right click sword"
+            : "Keyboard: arrows shoot, Enter/K sword";
+
+        string title =
+            $"Crystal Defense  |  Knight [{health}]  |  Dash {(_player.IsDashReady ? "ready" : "...")}" +
+            $"  |  {controls}  |  WASD move, Space dash, Q/E turn camera, R/F zoom";
+
+        // Changing the title is slow on some systems, so only do it when the text changes.
+        if (title != _hudTitle)
+        {
+            _hudTitle = title;
+            Title = title;
+        }
+    }
+
+    // =====================================================
     // TEXTURES
     // =====================================================
 
-    private static Texture LoadTexture(string fileName)
+    private static Texture LoadTexture(
+        string fileName
+    )
     {
         string texturePath = Path.Combine(
             AppContext.BaseDirectory,
@@ -435,7 +665,8 @@ internal sealed class CrystalDefenseWindow : Application
     // RESOURCE MANAGEMENT
     // =====================================================
 
-    private T Keep<T>(T resource) where T : IDisposable
+    private T Keep<T>(T resource)
+        where T : IDisposable
     {
         _resources.Add(resource);
         return resource;
