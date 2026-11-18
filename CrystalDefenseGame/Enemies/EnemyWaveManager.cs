@@ -18,6 +18,23 @@ public sealed class EnemyWaveManager
 
     public int CurrentWave { get; private set; }
 
+    // Added by Sarah: the game can wait between two waves (the player chooses an upgrade),
+    // then start the next wave itself. true = the original behaviour (a new wave every 25 seconds).
+    public bool AutoStartWaves { get; set; } = true;
+
+    public int TotalWaveCount => TotalWaves;
+
+    // The current wave has started, all its enemies have appeared and all of them are defeated.
+    public bool IsCurrentWaveCleared =>
+        CurrentWave > 0 &&
+        _spawner.AllEnemiesDefeated;
+
+    public void StartNextWaveNow()
+    {
+        _timer = 0.0f;
+        StartNextWave();
+    }
+
     // All waves are completed only when wave 10
     // has started and no enemies remain.
     public bool AllWavesCompleted =>
@@ -41,7 +58,7 @@ public sealed class EnemyWaveManager
 
     public void Update(float deltaTime)
     {
-        if (!_running || deltaTime <= 0.0f)
+        if (!_running || deltaTime <= 0.0f || !AutoStartWaves)
             return;
 
         // Do not create more than 10 waves

@@ -41,4 +41,13 @@ public sealed class Crystal : GameObject
     }
 
     public float HealthPercentage => Health / MaxHealth;
+
+    // Added by Sarah: used by the "repaired crystal" upgrade between the waves.
+    public void Repair(float amount)
+    {
+        if (!IsAlive || amount <= 0)
+            return;
+
+        Health = MathF.Min(MaxHealth, Health + amount);
+    }
 }
