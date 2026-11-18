@@ -49,17 +49,14 @@ public sealed class CollisionSystem
 
                 if (distance <= collisionDistance)
                 {
-                    // Damage the enemy.
                     enemy.TakeDamage(1);
 
-                    // Destroy the projectile after impact.
                     projectile.Destroy();
 
                     Console.WriteLine(
                         $"Projectile hit enemy! Enemy HP: {enemy.Health}"
                     );
 
-                    // One projectile hits only one enemy.
                     break;
                 }
             }
@@ -78,7 +75,17 @@ public sealed class CollisionSystem
     {
         foreach (Enemy enemy in enemies)
         {
+            // Remove timers for dead enemies.
             if (!enemy.IsAlive)
+            {
+                _attackTimers.Remove(enemy);
+                continue;
+            }
+
+            // Only enemies assigned to one of the
+            // six attack positions can attack.
+            // Waiting enemies cannot damage the crystal.
+            if (!enemy.CanAttackCrystal)
             {
                 _attackTimers.Remove(enemy);
                 continue;
@@ -99,11 +106,11 @@ public sealed class CollisionSystem
             float collisionDistance =
                 enemy.Radius + crystal.Radius;
 
-            bool touchingCrystal =
-                distance <= collisionDistance + 0.01f;
+            // Small tolerance for the assigned attack position.
+            bool inAttackRange =
+                distance <= collisionDistance + 0.25f;
 
-            // Enemy has not reached the crystal.
-            if (!touchingCrystal)
+            if (!inAttackRange)
             {
                 _attackTimers.Remove(enemy);
                 continue;
@@ -115,14 +122,17 @@ public sealed class CollisionSystem
                 _attackTimers[enemy] = 0.0f;
 
                 Console.WriteLine(
-                    "Enemy reached the crystal!"
+                    "Enemy reached an attack position!"
                 );
             }
 
-            // Increase the timer.
-            _attackTimers[enemy] += MathF.Max(0.0f, deltaTime);
+            // Increase attack timer.
+            _attackTimers[enemy] += MathF.Max(
+                0.0f,
+                deltaTime
+            );
 
-            // Attack every 3 seconds.
+            // Attack once every 3 seconds.
             if (_attackTimers[enemy] >= AttackCooldown)
             {
                 crystal.TakeDamage(1);
@@ -134,9 +144,7 @@ public sealed class CollisionSystem
                 );
             }
 
-            // IMPORTANT:
-            // Do NOT destroy the enemy here.
-            // The enemy stays alive until the player kills it.
+            // Enemy stays alive until the player kills it.
         }
     }
 
@@ -144,7 +152,6 @@ public sealed class CollisionSystem
     // PLAYER SWORD - ENEMY COLLISIONS (added by Sarah)
     // =====================================================
 
-    // In the middle of a sword slash, every enemy in a cone in front of the knight takes damage.
     public void CheckSwordEnemyCollisions(
         Player player,
         IReadOnlyList<Enemy> enemies
@@ -154,7 +161,9 @@ public sealed class CollisionSystem
             return;
 
         float minimumCos = MathF.Cos(
-            MathHelper.DegreesToRadians(Player.SwordHalfAngleDegrees)
+            MathHelper.DegreesToRadians(
+                Player.SwordHalfAngleDegrees
+            )
         );
 
         foreach (Enemy enemy in enemies)
@@ -162,18 +171,24 @@ public sealed class CollisionSystem
             if (!enemy.IsAlive)
                 continue;
 
-            // Horizontal vector from the knight to the enemy.
-            Vector3 toEnemy = enemy.Position - player.Position;
+            Vector3 toEnemy =
+                enemy.Position - player.Position;
+
             toEnemy.Y = 0.0f;
+
             float distance = toEnemy.Length;
 
             if (distance > Player.SwordReach + enemy.Radius)
                 continue;
 
-            // Is the enemy in front of the knight? (dot product = cosine of the angle)
             if (distance > 0.001f &&
-                Vector3.Dot(toEnemy / distance, player.FacingDirection) < minimumCos)
+                Vector3.Dot(
+                    toEnemy / distance,
+                    player.FacingDirection
+                ) < minimumCos)
+            {
                 continue;
+            }
 
             enemy.TakeDamage(player.SwordDamage);
 
@@ -187,7 +202,6 @@ public sealed class CollisionSystem
     // ENEMY - PLAYER COLLISIONS (added by Sarah)
     // =====================================================
 
-    // An enemy that touches the knight hurts him (he is then invincible for a moment).
     public void CheckEnemyPlayerCollisions(
         IReadOnlyList<Enemy> enemies,
         Player player

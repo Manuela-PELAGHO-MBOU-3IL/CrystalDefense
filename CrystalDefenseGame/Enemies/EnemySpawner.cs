@@ -1,116 +1,327 @@
 
 using System;
 using System.Collections.Generic;
-using CrystalDefense.Core;
 using Engine;
-using Engine.Materials;
 using Engine.OpenGL;
+using Engine.Materials;
 using OpenTK.Mathematics;
 
 namespace CrystalDefenseGame.Enemies;
 
 public sealed class EnemySpawner
 {
-    // Enemy resources
     private readonly Mesh _enemyMesh;
     private readonly Material _enemyMaterial;
 
-    // Active enemies
-    private readonly List<Enemy> _enemies = new();
+    private CrystalGolemRenderer? _golemRenderer;
 
-    // Enemies waiting to spawn
+    private IReadOnlyDictionary<int, Material> _golemMaterials =
+        new Dictionary<int, Material>();
+
+    private readonly List<Enemy> _enemies = new();
     private readonly Queue<SpawnRequest> _spawnQueue = new();
 
     private readonly Random _random = new();
 
-    // Spawn timing
-    private float _spawnTimer = 0.0f;
-    private float _spawnInterval = 2.0f;
+    private readonly Dictionary<Enemy, float> _animationTimes =
+        new();
+
+    private readonly Dictionary<Enemy, bool> _walkingStates =
+        new();
+
+    // =====================================================
+    // DEATH FRAGMENTS
+    // =====================================================
+
+    private readonly Dictionary<Enemy, Vector3[]> _deathFragments =
+        new();
+
+    private const int FragmentCount = 12;
+    private const float FragmentScale = 0.16f;
+    private const float FragmentGravity = 2.5f;
+
+    // =====================================================
+    // ENEMY SETTINGS
+    // =====================================================
+
+    private const int MaxAttackers = 6;
+
+    private const float GolemScale = 0.80f;
+    private const float MinimumSpawnDistance = 1.6f;
+    private const float SpawnVariation = 0.4f;
+
+    private readonly Vector3[] _spawnGates =
+    {
+        new Vector3(0.0f, 0.5f, -9.0f),
+        new Vector3(9.0f, 0.5f, 0.0f),
+        new Vector3(0.0f, 0.5f, 9.0f),
+        new Vector3(-9.0f, 0.5f, 0.0f)
+    };
+
+    private int _nextGateIndex;
+    private float _spawnTimer;
+
+    private Vector3 _crystalPosition = Vector3.Zero;
+
+    private readonly record struct SpawnRequest(
+        float Speed,
+        int Health,
+        float Interval
+    );
 
     public IReadOnlyList<Enemy> Enemies => _enemies;
 
-    // A wave is finished only when all enemies
-    // have spawned and all active enemies are defeated.
+    // Wait for all death animations before clearing a wave.
     public bool AllEnemiesDefeated =>
         _spawnQueue.Count == 0 &&
-        _enemies.TrueForAll(enemy => !enemy.IsAlive);
+        _enemies.TrueForAll(enemy =>
+            !enemy.IsAlive &&
+            (!enemy.IsDying || enemy.DeathAnimationFinished)
+        );
 
-    // Four arena gates
-    private readonly Vector3[] _doors =
-    {
-        new(0.0f, 0.5f, -9.0f),
-        new(0.0f, 0.5f,  9.0f),
-        new(9.0f, 0.5f,  0.0f),
-        new(-9.0f, 0.5f, 0.0f)
-    };
+    // =====================================================
+    // CONSTRUCTOR
+    // =====================================================
 
     public EnemySpawner(
         Mesh enemyMesh,
-        Material enemyMaterial
-    )
+        Material enemyMaterial)
     {
         _enemyMesh = enemyMesh;
         _enemyMaterial = enemyMaterial;
     }
 
     // =====================================================
-    // SPAWN WAVE - ORIGINAL METHOD (3 PARAMETERS)
+    // GOLEM RENDERER
     // =====================================================
 
-    public void SpawnWave(
-        int enemyCount,
-        float speed = 0.5f,
-        int health = 1
-    )
+    public void SetGolemRenderer(
+        CrystalGolemRenderer renderer,
+        IReadOnlyDictionary<int, Material> materials)
     {
-        SpawnWave(
-            enemyCount,
-            speed,
-            health,
-            2.0f
+        _golemRenderer =
+            renderer ?? throw new ArgumentNullException(
+                nameof(renderer)
+            );
+
+        _golemMaterials =
+            materials ?? throw new ArgumentNullException(
+                nameof(materials)
+            );
+    }
+
+    public void SetGolemRenderer(
+        CrystalGolemRenderer renderer)
+    {
+        SetGolemRenderer(
+            renderer,
+            new Dictionary<int, Material>()
         );
     }
 
     // =====================================================
-    // SPAWN WAVE - NEW METHOD (4 PARAMETERS)
+    // WAVE SPAWNING
     // =====================================================
 
     public void SpawnWave(
         int enemyCount,
         float speed,
         int health,
-        float spawnInterval
-    )
+        float spawnInterval)
     {
-        _spawnInterval = MathF.Max(
+        if (enemyCount <= 0)
+            return;
+
+        bool wasEmpty = _spawnQueue.Count == 0;
+
+        float interval = MathF.Max(
             0.1f,
             spawnInterval
         );
 
-        // First enemy spawns immediately.
-        _spawnTimer = 0.0f;
-
+        // Append new groups without clearing pending enemies.
         for (int i = 0; i < enemyCount; i++)
         {
-            // Distribute enemies between the gates.
-            int doorIndex = i % _doors.Length;
-
-            // Small variation in speed.
-            float randomSpeed =
-                speed * RandomRange(0.85f, 1.15f);
-
             _spawnQueue.Enqueue(
                 new SpawnRequest(
-                    doorIndex,
-                    randomSpeed,
-                    health
+                    speed,
+                    health,
+                    interval
                 )
             );
         }
 
+        if (wasEmpty)
+            _spawnTimer = 0.0f;
+
         Console.WriteLine(
             $"Scheduled {enemyCount} enemies."
         );
+    }
+
+    private bool IsSpawnPositionFree(Vector3 position)
+    {
+        foreach (Enemy enemy in _enemies)
+        {
+            if (!enemy.IsAlive)
+                continue;
+
+            Vector3 difference =
+                enemy.Position - position;
+
+            difference.Y = 0.0f;
+
+            if (difference.LengthSquared <
+                MinimumSpawnDistance * MinimumSpawnDistance)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool TryFindSpawnPosition(
+        out Vector3 position,
+        out int gateIndex)
+    {
+        for (int attempt = 0;
+             attempt < _spawnGates.Length;
+             attempt++)
+        {
+            int index =
+                (_nextGateIndex + attempt)
+                % _spawnGates.Length;
+
+            Vector3 candidate = _spawnGates[index];
+
+            float offset =
+                ((float)_random.NextDouble() * 2.0f - 1.0f)
+                * SpawnVariation;
+
+            if (index == 0 || index == 2)
+                candidate.X += offset;
+            else
+                candidate.Z += offset;
+
+            if (!IsSpawnPositionFree(candidate))
+                continue;
+
+            position = candidate;
+            gateIndex = index;
+            return true;
+        }
+
+        position = Vector3.Zero;
+        gateIndex = -1;
+        return false;
+    }
+
+    private bool SpawnNextEnemy()
+    {
+        if (_spawnQueue.Count == 0)
+            return false;
+
+        if (!TryFindSpawnPosition(
+            out Vector3 position,
+            out int gateIndex))
+        {
+            return false;
+        }
+
+        SpawnRequest request = _spawnQueue.Dequeue();
+
+        _nextGateIndex =
+            (gateIndex + 1) % _spawnGates.Length;
+
+        Enemy enemy = new Enemy(
+            _enemyMesh,
+            _enemyMaterial,
+            position,
+            request.Speed,
+            request.Health,
+            isBoss: false
+        );
+
+        _enemies.Add(enemy);
+
+        _animationTimes[enemy] = 0.0f;
+        _walkingStates[enemy] = false;
+
+        Console.WriteLine(
+            $"Enemy spawned at gate {gateIndex + 1}."
+        );
+
+        return true;
+    }
+
+    // =====================================================
+    // ATTACK PERMISSIONS
+    // =====================================================
+
+    private void UpdateAttackPermissions()
+    {
+        foreach (Enemy enemy in _enemies)
+        {
+            enemy.SetAttackPermission(false);
+        }
+
+        List<Enemy> alive = new();
+
+        foreach (Enemy enemy in _enemies)
+        {
+            if (enemy.IsAlive)
+                alive.Add(enemy);
+        }
+
+        alive.Sort((a, b) =>
+        {
+            float distanceA =
+                (a.Position - _crystalPosition).LengthSquared;
+
+            float distanceB =
+                (b.Position - _crystalPosition).LengthSquared;
+
+            return distanceA.CompareTo(distanceB);
+        });
+
+        int count = Math.Min(
+            MaxAttackers,
+            alive.Count
+        );
+
+        for (int i = 0; i < count; i++)
+        {
+            alive[i].SetAttackPermission(true);
+        }
+    }
+
+    // =====================================================
+    // CREATE DEATH FRAGMENTS
+    // =====================================================
+
+    private Vector3[] CreateDeathFragments()
+    {
+        Vector3[] fragments = new Vector3[FragmentCount];
+
+        for (int i = 0; i < fragments.Length; i++)
+        {
+            float angle =
+                (float)_random.NextDouble() *
+                MathF.PI * 2.0f;
+
+            float speed =
+                0.8f +
+                (float)_random.NextDouble() * 1.5f;
+
+            fragments[i] = new Vector3(
+                MathF.Cos(angle) * speed,
+                1.0f + (float)_random.NextDouble() * 1.5f,
+                MathF.Sin(angle) * speed
+            );
+        }
+
+        return fragments;
     }
 
     // =====================================================
@@ -120,30 +331,53 @@ public sealed class EnemySpawner
     public void Update(
         float deltaTime,
         Vector3 crystalPosition,
-        float crystalRadius
-    )
+        float crystalRadius)
     {
         if (deltaTime <= 0.0f)
             return;
 
-        // Spawn enemies one by one.
+        _crystalPosition = crystalPosition;
+
+        // Spawn queued enemies.
         if (_spawnQueue.Count > 0)
         {
-            _spawnTimer -= deltaTime;
+            SpawnRequest next = _spawnQueue.Peek();
 
-            if (_spawnTimer <= 0.0f)
+            _spawnTimer += deltaTime;
+
+            if (_spawnTimer >= next.Interval)
             {
-                SpawnNextEnemy();
-
-                _spawnTimer += _spawnInterval;
+                if (SpawnNextEnemy())
+                    _spawnTimer = 0.0f;
+                else
+                    _spawnTimer = next.Interval;
             }
         }
 
-        // Update enemy movement.
+        UpdateAttackPermissions();
+
+        // Update death animations.
+        foreach (Enemy enemy in _enemies)
+        {
+            if (!enemy.IsDying)
+                continue;
+
+            if (!_deathFragments.ContainsKey(enemy))
+            {
+                _deathFragments[enemy] =
+                    CreateDeathFragments();
+            }
+
+            enemy.UpdateDeathAnimation(deltaTime);
+        }
+
+        // Move living enemies.
         foreach (Enemy enemy in _enemies)
         {
             if (!enemy.IsAlive)
                 continue;
+
+            Vector3 oldPosition = enemy.Position;
 
             enemy.Update(
                 deltaTime,
@@ -151,74 +385,138 @@ public sealed class EnemySpawner
                 crystalRadius,
                 _enemies
             );
+
+            Vector3 movement =
+                enemy.Position - oldPosition;
+
+            movement.Y = 0.0f;
+
+            bool walking =
+                movement.LengthSquared > 0.00000001f;
+
+            _walkingStates[enemy] = walking;
+
+            if (walking)
+            {
+                _animationTimes[enemy] += deltaTime;
+            }
         }
     }
 
     // =====================================================
-    // SPAWN NEXT ENEMY
-    // =====================================================
-
-    private void SpawnNextEnemy()
-    {
-        if (_spawnQueue.Count == 0)
-            return;
-
-        SpawnRequest request = _spawnQueue.Dequeue();
-
-        Vector3 position = _doors[request.DoorIndex];
-
-        // Random position at the gate.
-        float lateralOffset =
-            RandomRange(-1.0f, 1.0f);
-
-        float depthOffset =
-            RandomRange(-0.3f, 0.3f);
-
-        if (request.DoorIndex <= 1)
-        {
-            position.X += lateralOffset;
-            position.Z += depthOffset;
-        }
-        else
-        {
-            position.Z += lateralOffset;
-            position.X += depthOffset;
-        }
-
-        // Slightly different target position.
-        Vector3 targetOffset = new Vector3(
-            RandomRange(-0.6f, 0.6f),
-            0.0f,
-            RandomRange(-0.6f, 0.6f)
-        );
-
-        Enemy enemy = new Enemy(
-            _enemyMesh,
-            _enemyMaterial,
-            position,
-            request.Speed,
-            request.Health,
-            isBoss: false,
-            targetOffset: targetOffset
-        );
-
-        _enemies.Add(enemy);
-
-        Console.WriteLine(
-            $"Enemy spawned at gate {request.DoorIndex + 1}. " +
-            $"Remaining: {_spawnQueue.Count}"
-        );
-    }
-
-    // =====================================================
-    // REMOVE DEFEATED ENEMIES
+    // REMOVE DEAD ENEMIES
     // =====================================================
 
     public void RemoveDeadEnemies()
     {
-        _enemies.RemoveAll(
-            enemy => !enemy.IsAlive
+        // Keep dying enemies until their animation ends.
+        _enemies.RemoveAll(enemy =>
+            !enemy.IsAlive &&
+            (!enemy.IsDying || enemy.DeathAnimationFinished)
         );
+
+        var deadAnimationEntries = new List<Enemy>();
+
+        foreach (Enemy enemy in _animationTimes.Keys)
+        {
+            if (!enemy.IsAlive)
+            {
+                deadAnimationEntries.Add(enemy);
+            }
+        }
+
+        foreach (Enemy enemy in deadAnimationEntries)
+        {
+            _animationTimes.Remove(enemy);
+            _walkingStates.Remove(enemy);
+        }
+
+        var finishedFragments = new List<Enemy>();
+
+        foreach (Enemy enemy in _deathFragments.Keys)
+        {
+            if (enemy.DeathAnimationFinished)
+            {
+                finishedFragments.Add(enemy);
+            }
+        }
+
+        foreach (Enemy enemy in finishedFragments)
+        {
+            _deathFragments.Remove(enemy);
+        }
+    }
+
+    // =====================================================
+    // DRAW DEATH FRAGMENTS
+    // =====================================================
+
+    private void DrawDeathFragments(
+        OpenGlRenderer renderer,
+        Camera camera,
+        Enemy enemy)
+    {
+        if (!_deathFragments.TryGetValue(
+            enemy,
+            out Vector3[]? fragments))
+        {
+            return;
+        }
+
+        float t = enemy.DeathTimer;
+
+        float progress = Math.Clamp(
+            t / Enemy.DeathDuration,
+            0.0f,
+            1.0f
+        );
+
+        float scale =
+            FragmentScale * (1.0f - progress);
+
+        if (scale <= 0.001f)
+            return;
+
+        for (int i = 0; i < fragments.Length; i++)
+        {
+            Vector3 velocity = fragments[i];
+
+            Vector3 offset =
+                velocity * t +
+                new Vector3(
+                    0.0f,
+                    -FragmentGravity * t * t,
+                    0.0f
+                );
+
+            Vector3 position =
+                enemy.Position + offset;
+
+            position.Y = MathF.Max(
+                0.1f,
+                position.Y
+            );
+
+            Matrix4 modelMatrix =
+                Matrix4.CreateScale(scale) *
+                Matrix4.CreateRotationY(t * 4.0f + i) *
+                Matrix4.CreateTranslation(position);
+
+            // Draw a small mesh for each fragment.
+            // Uses the existing golem renderer.
+            if (_golemRenderer != null)
+            {
+                _golemRenderer.Draw(
+                    renderer,
+                    camera,
+                    _golemMaterials,
+                    _enemyMaterial,
+                    modelMatrix,
+                    0.0f,
+                    false
+                );
+            }
+        }
     }
 
     // =====================================================
@@ -227,42 +525,77 @@ public sealed class EnemySpawner
 
     public void Draw(
         OpenGlRenderer renderer,
-        Camera camera
-    )
+        Camera camera)
     {
         foreach (Enemy enemy in _enemies)
         {
-            if (enemy.IsAlive)
+            // Draw fragments for defeated enemies.
+            if (enemy.IsDying)
             {
-                enemy.Draw(
-                    renderer,
-                    camera
-                );
+                if (!enemy.DeathAnimationFinished)
+                {
+                    DrawDeathFragments(
+                        renderer,
+                        camera,
+                        enemy
+                    );
+                }
+
+                continue;
             }
+
+            if (!enemy.IsAlive)
+                continue;
+
+            if (_golemRenderer == null)
+            {
+                enemy.Draw(renderer, camera);
+                continue;
+            }
+
+            Vector3 direction =
+                _crystalPosition - enemy.Position;
+
+            direction.Y = 0.0f;
+
+            if (direction.LengthSquared < 0.0001f)
+                direction = Vector3.UnitZ;
+
+            direction.Normalize();
+
+            float angle = MathF.Atan2(
+                direction.X,
+                direction.Z
+            );
+
+            Matrix4 modelMatrix =
+                Matrix4.CreateScale(GolemScale) *
+                Matrix4.CreateRotationY(angle) *
+                Matrix4.CreateTranslation(enemy.Position);
+
+            float animationTime =
+                _animationTimes.TryGetValue(
+                    enemy,
+                    out float time
+                )
+                ? time
+                : 0.0f;
+
+            bool walking =
+                _walkingStates.TryGetValue(
+                    enemy,
+                    out bool isWalking
+                ) && isWalking;
+
+            _golemRenderer.Draw(
+                renderer,
+                camera,
+                _golemMaterials,
+                _enemyMaterial,
+                modelMatrix,
+                animationTime,
+                walking
+            );
         }
     }
-
-    // =====================================================
-    // RANDOM HELPER
-    // =====================================================
-
-    private float RandomRange(
-        float min,
-        float max
-    )
-    {
-        return min +
-            (float)_random.NextDouble() *
-            (max - min);
-    }
-
-    // =====================================================
-    // SPAWN REQUEST
-    // =====================================================
-
-    private readonly record struct SpawnRequest(
-        int DoorIndex,
-        float Speed,
-        int Health
-    );
 }
