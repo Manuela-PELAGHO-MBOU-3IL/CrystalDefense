@@ -175,7 +175,7 @@ public sealed class CollisionSystem
                 Vector3.Dot(toEnemy / distance, player.FacingDirection) < minimumCos)
                 continue;
 
-            enemy.TakeDamage(Player.SwordDamage);
+            enemy.TakeDamage(player.SwordDamage);
 
             Console.WriteLine(
                 $"Sword hit enemy! Enemy HP: {enemy.Health}"

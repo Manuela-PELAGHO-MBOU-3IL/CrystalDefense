@@ -36,7 +36,7 @@ public sealed class OrbitCamera
     // Vertical angle (0 = horizontal, 90° = straight from above).
     public float Pitch { get; private set; } = MathHelper.DegreesToRadians(55.0f);
 
-    public float Distance { get; private set; } = 11.0f;
+    public float Distance { get; private set; } = 12.0f;
 
     public float KeyRotateSpeed { get; set; } = 2.0f;        // radians per second
     public float KeyZoomSpeed { get; set; } = 10.0f;         // units per second
@@ -44,7 +44,7 @@ public sealed class OrbitCamera
     public float FollowSmoothness { get; set; } = 10.0f;     // larger = follows faster
 
     // The camera looks at the player's chest, not at his feet.
-    private static Vector3 TargetHeight => new(0.0f, 1.0f, 0.0f);
+    private static Vector3 TargetHeight => new(0.0f, 1.3f, 0.0f);
 
     // "Forward" and "right" seen from the camera, flat on the floor (length 1).
     // The player moves relative to these, so W always means "away from the camera".
@@ -52,6 +52,9 @@ public sealed class OrbitCamera
     public Vector3 FlatRight => new(MathF.Cos(Yaw), 0.0f, -MathF.Sin(Yaw));
 
     public void Shake(float strength) => _shake = MathF.Max(_shake, strength);
+
+    // Turns the camera around the player by itself (used behind the menus).
+    public void Rotate(float radians) => Yaw += radians;
 
     public void Update(float deltaTime, KeyboardState keyboard, MouseState mouse, Vector3 playerPosition)
     {

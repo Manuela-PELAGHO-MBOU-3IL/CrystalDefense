@@ -26,6 +26,10 @@ public sealed class ProjectileManager
     public float ProjectileSpeed { get; set; } = 15.0f;
     public float ProjectileRadius { get; set; } = 0.2f;
 
+    // Number of projectiles per shot (an upgrade can increase it); they spread out like a fan.
+    public int ProjectilesPerShot { get; set; } = 1;
+    public float SpreadAngleDegrees { get; set; } = 10.0f;
+
     // Height above the floor at which the projectiles fly.
     public float ShootingHeight { get; set; } = 0.5f;
 
@@ -53,11 +57,24 @@ public sealed class ProjectileManager
 
     private void Shoot(Player player)
     {
-        // The projectile starts just in front of the player, so that it does not appear inside him.
+        // The projectiles start just in front of the player, so that they do not appear inside him.
         Vector3 start = player.Position + player.FacingDirection * (player.Radius + ProjectileRadius);
         start.Y = ShootingHeight;
 
-        _projectiles.Add(new Projectile(_mesh, _material, start, player.FacingDirection, ProjectileSpeed, ProjectileRadius));
+        for (int i = 0; i < ProjectilesPerShot; i++)
+        {
+            // Angle of this projectile in the fan: 0 in the middle, negative on one side, positive on the other.
+            float angle = MathHelper.DegreesToRadians((i - (ProjectilesPerShot - 1) * 0.5f) * SpreadAngleDegrees);
+            Vector3 direction = RotateAroundY(player.FacingDirection, angle);
+            _projectiles.Add(new Projectile(_mesh, _material, start, direction, ProjectileSpeed, ProjectileRadius));
+        }
+    }
+
+    private static Vector3 RotateAroundY(Vector3 v, float angle)
+    {
+        float cos = MathF.Cos(angle);
+        float sin = MathF.Sin(angle);
+        return new Vector3(v.X * cos + v.Z * sin, v.Y, -v.X * sin + v.Z * cos);
     }
 
     public void Draw(OpenGlRenderer renderer, Camera camera)

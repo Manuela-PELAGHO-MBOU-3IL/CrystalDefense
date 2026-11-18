@@ -23,8 +23,8 @@ public sealed class KnightModel
     // They come from the pivots used in Blender/make_knight.py.
     private static readonly Vector3 RightHip = new(0.12f, 0.85f, 0.0f);
     private static readonly Vector3 LeftHip = new(-0.12f, 0.85f, 0.0f);
-    private static readonly Vector3 RightShoulder = new(0.31f, 1.32f, 0.0f);
-    private static readonly Vector3 LeftShoulder = new(-0.31f, 1.32f, 0.0f);
+    private static readonly Vector3 RightShoulder = new(0.33f, 1.32f, 0.0f);
+    private static readonly Vector3 LeftShoulder = new(-0.33f, 1.32f, 0.0f);
     private static readonly Vector3 CapeTop = new(0.0f, 1.32f, 0.17f);
 
     private const float StrideAngle = 0.55f;          // leg swing while walking, in radians (about 30°)

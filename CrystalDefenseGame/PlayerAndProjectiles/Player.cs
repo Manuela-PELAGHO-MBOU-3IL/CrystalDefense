@@ -12,17 +12,14 @@ namespace CrystalDefense.PlayerAndProjectiles;
 public sealed class Player : GameObject
 {
     // --- settings ---
-    public const int MaxHealth = 5;
     public const float DashSpeed = 18.0f;
     public const float DashDuration = 0.18f;
-    public const float DashCooldown = 1.0f;
     public const float InvincibleTimeAfterHit = 1.0f;
     public const float RespawnTime = 3.0f;
     public const float SwordDuration = 0.3f;
     public const float SwordCooldown = 0.5f;
     public const float SwordReach = 2.0f;
     public const float SwordHalfAngleDegrees = 75.0f;   // the sword hits in a cone of 150° in front of the knight
-    public const int SwordDamage = 2;
 
     private readonly KnightModel _model;
     private readonly Vector3 _spawnPosition;
@@ -51,6 +48,11 @@ public sealed class Player : GameObject
 
     public int Health { get; private set; }
 
+    // These values can grow with the upgrades chosen between the waves.
+    public int MaxHealth { get; private set; } = 5;
+    public int SwordDamage { get; set; } = 2;
+    public float DashCooldown { get; set; } = 1.0f;
+
     // The direction the knight looks at (length 1). Projectiles and the sword go in this direction.
     public Vector3 FacingDirection { get; private set; } = -Vector3.UnitZ;
 
@@ -59,6 +61,9 @@ public sealed class Player : GameObject
     public bool IsDashing => _dashTimer > 0.0f;
     public bool IsInvincible => IsKnockedOut || IsDashing || _invincibleTimer > 0.0f;
     public bool IsDashReady => _dashCooldownTimer <= 0.0f;
+
+    // 0 = the dash has just been used, 1 = it is ready again (for the HUD).
+    public float DashCharge => DashCooldown <= 0.0f ? 1.0f : 1.0f - _dashCooldownTimer / DashCooldown;
 
     // 0 → 1 during a sword slash, -1 when the knight does not attack.
     public float SwordProgress => _swordTimer > 0.0f ? 1.0f - _swordTimer / SwordDuration : -1.0f;
@@ -127,6 +132,18 @@ public sealed class Player : GameObject
 
         _swordStrikeUsed = true;
         return true;
+    }
+
+    public void IncreaseMaxHealth(int amount)
+    {
+        MaxHealth += Math.Max(0, amount);
+        Health = MaxHealth;
+    }
+
+    public void HealFully()
+    {
+        if (!IsKnockedOut)
+            Health = MaxHealth;
     }
 
     // Returns true if the hit counted (not while invincible).
