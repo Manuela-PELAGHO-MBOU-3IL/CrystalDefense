@@ -15,8 +15,29 @@ public class Enemy : GameObject
     public int Health { get; private set; }
     public bool IsBoss { get; }
 
-    // Small variation in the destination.
-    private readonly Vector3 _targetOffset;
+    public bool CanAttackCrystal { get; private set; }
+
+    private bool _allowedToAttack;
+    private Vector3 _steeringDirection = Vector3.Zero;
+
+    private const float SeparationMargin = 0.35f;
+    private const float AvoidanceRange = 2.4f;
+    private const float SteeringStrength = 1.2f;
+    private const float TurnSpeed = 5.0f;
+    private const float CrystalExtraDistance = 0.05f;
+
+    // =====================================================
+    // DEATH ANIMATION
+    // =====================================================
+
+    public bool IsDying { get; private set; }
+
+    public float DeathTimer { get; private set; }
+
+    public const float DeathDuration = 1.5f;
+
+    public bool DeathAnimationFinished =>
+        IsDying && DeathTimer >= DeathDuration;
 
     public Enemy(
         Mesh mesh,
@@ -37,16 +58,31 @@ public class Enemy : GameObject
         MaxHealth = Math.Max(1, health);
         Health = MaxHealth;
         IsBoss = isBoss;
-
-        _targetOffset = targetOffset ?? Vector3.Zero;
     }
 
-    // Keep the original method for compatibility.
+    public void SetAttackPermission(bool allowed)
+    {
+        _allowedToAttack = allowed;
+
+        if (!allowed)
+            CanAttackCrystal = false;
+    }
+
+    public void UpdateDeathAnimation(float deltaTime)
+    {
+        if (!IsDying)
+            return;
+
+        DeathTimer = MathF.Min(
+            DeathTimer + MathF.Max(0.0f, deltaTime),
+            DeathDuration
+        );
+    }
+
     public void Update(
         float deltaTime,
         Vector3 crystalPosition,
-        float crystalRadius
-    )
+        float crystalRadius)
     {
         Update(
             deltaTime,
@@ -56,120 +92,149 @@ public class Enemy : GameObject
         );
     }
 
-    // Improved movement with enemy separation.
     public void Update(
         float deltaTime,
         Vector3 crystalPosition,
         float crystalRadius,
-        IReadOnlyList<Enemy>? otherEnemies
-    )
+        IReadOnlyList<Enemy>? otherEnemies)
     {
         if (!IsAlive || deltaTime <= 0.0f)
             return;
 
-        // All enemies approach the crystal,
-        // but with slightly different directions.
-        Vector3 target = crystalPosition + _targetOffset;
+        Vector3 toCrystal = crystalPosition - Position;
+        toCrystal.Y = 0.0f;
 
-        Vector3 direction = target - Position;
-        direction.Y = 0.0f;
+        float crystalDistance = toCrystal.Length;
 
-        // Distance to the actual crystal center.
-        Vector3 crystalDirection = crystalPosition - Position;
-        crystalDirection.Y = 0.0f;
+        float stopDistance =
+            crystalRadius + Radius + CrystalExtraDistance;
 
-        float crystalDistance = crystalDirection.Length;
-        float stopDistance = crystalRadius + Radius;
+        float desiredStopDistance = _allowedToAttack
+            ? stopDistance
+            : stopDistance + 1.9f;
 
-        // Stop when the enemy reaches the crystal.
-        if (crystalDistance <= stopDistance)
+        if (crystalDistance <= desiredStopDistance + 0.08f)
+        {
+            CanAttackCrystal =
+                _allowedToAttack &&
+                crystalDistance <= stopDistance + 0.20f;
+
+            _steeringDirection = Vector3.Zero;
             return;
+        }
 
-        if (direction.LengthSquared < 0.0001f)
-            direction = crystalDirection;
+        CanAttackCrystal = false;
 
-        if (direction.LengthSquared < 0.0001f)
-            return;
+        Vector3 desiredDirection =
+            toCrystal / crystalDistance;
 
-        direction.Normalize();
-
-        // Separation prevents enemies from
-        // overlapping and moving in one line.
-        Vector3 separation = Vector3.Zero;
+        Vector3 avoidance = Vector3.Zero;
 
         if (otherEnemies != null)
         {
             foreach (Enemy other in otherEnemies)
             {
-                if (ReferenceEquals(other, this))
+                if (ReferenceEquals(other, this) ||
+                    !other.IsAlive)
                     continue;
 
-                if (!other.IsAlive)
-                    continue;
+                Vector3 difference =
+                    Position - other.Position;
 
-                Vector3 difference = Position - other.Position;
                 difference.Y = 0.0f;
 
                 float distance = difference.Length;
 
-                float minimumDistance =
-                    Radius + other.Radius + 0.3f;
+                if (distance < 0.0001f ||
+                    distance >= AvoidanceRange)
+                    continue;
 
-                if (distance > 0.0001f &&
-                    distance < minimumDistance)
-                {
-                    float strength =
-                        (minimumDistance - distance)
-                        / minimumDistance;
+                float strength =
+                    (AvoidanceRange - distance) /
+                    AvoidanceRange;
 
-                    separation +=
-                        (difference / distance) * strength;
-                }
+                avoidance +=
+                    difference / distance * strength;
             }
         }
 
-        // Combine movement and separation.
-        Vector3 movementDirection =
-            direction + separation * 1.5f;
+        Vector3 desiredSteering =
+            desiredDirection +
+            avoidance * SteeringStrength;
 
-        if (movementDirection.LengthSquared < 0.0001f)
-            movementDirection = direction;
+        if (desiredSteering.LengthSquared < 0.0001f)
+            desiredSteering = desiredDirection;
 
-        movementDirection.Normalize();
+        desiredSteering.Normalize();
 
-        // Prevent movement past the crystal.
-        float movement = MathF.Min(
+        if (_steeringDirection.LengthSquared < 0.0001f)
+        {
+            _steeringDirection = desiredSteering;
+        }
+        else
+        {
+            float blend = Math.Clamp(
+                TurnSpeed * deltaTime,
+                0.0f,
+                1.0f
+            );
+
+            Vector3 blended =
+                _steeringDirection * (1.0f - blend) +
+                desiredSteering * blend;
+
+            if (blended.LengthSquared > 0.0001f)
+            {
+                blended.Normalize();
+                _steeringDirection = blended;
+            }
+            else
+            {
+                _steeringDirection = desiredSteering;
+            }
+        }
+
+        float step = MathF.Min(
             Speed * deltaTime,
-            crystalDistance - stopDistance
+            crystalDistance - desiredStopDistance
         );
 
-        Vector3 nextPosition =
-            Position + movementDirection * movement;
+        if (step <= 0.0f)
+            return;
 
-        // Do not allow movement inside the crystal.
-        Vector3 nextDifference =
+        Vector3 nextPosition =
+            Position + _steeringDirection * step;
+
+        Vector3 nextToCrystal =
             nextPosition - crystalPosition;
 
-        nextDifference.Y = 0.0f;
+        nextToCrystal.Y = 0.0f;
 
-        if (nextDifference.Length < stopDistance)
+        if (nextToCrystal.Length <
+            crystalRadius + Radius)
+            return;
+
+        if (otherEnemies != null)
         {
-            Vector3 outward = nextDifference;
-
-            if (outward.LengthSquared < 0.0001f)
-                outward = -crystalDirection;
-
-            if (outward.LengthSquared > 0.0001f)
+            foreach (Enemy other in otherEnemies)
             {
-                outward.Normalize();
+                if (ReferenceEquals(other, this) ||
+                    !other.IsAlive)
+                    continue;
 
-                nextPosition.X =
-                    crystalPosition.X +
-                    outward.X * stopDistance;
+                Vector3 difference =
+                    nextPosition - other.Position;
 
-                nextPosition.Z =
-                    crystalPosition.Z +
-                    outward.Z * stopDistance;
+                difference.Y = 0.0f;
+
+                float minimumDistance =
+                    Radius +
+                    other.Radius +
+                    SeparationMargin;
+
+                if (difference.LengthSquared <
+                    minimumDistance * minimumDistance)
+                    return;
             }
         }
 
@@ -185,12 +250,15 @@ public class Enemy : GameObject
 
         if (Health == 0)
         {
+            IsDying = true;
+            DeathTimer = 0.0f;
+            CanAttackCrystal = false;
+            _allowedToAttack = false;
+
             Destroy();
 
             Console.WriteLine(
-                IsBoss
-                    ? "Boss defeated!"
-                    : "Enemy defeated!"
+                "Crystal Golem defeated! Shattering..."
             );
         }
     }

@@ -28,23 +28,14 @@ using OpenTK.Windowing.GraphicsLibraryFramework;
 
 namespace CrystalDefense.Game;
 
-// The main window. It loads the models once (Initialize), creates a fresh game when needed (StartNewGame)
-// and switches between the screens of the game: menu, playing, pause, upgrade choice, victory, defeat.
 internal sealed class CrystalDefenseWindow : Application
 {
-    // =====================================================
     // ENGINE
-    // =====================================================
-
     private OpenGlRenderer _renderer = null!;
     private Camera _camera = null!;
-
     private readonly List<IDisposable> _resources = new();
 
-    // =====================================================
-    // MANUELA - ARENA AND CRYSTAL
-    // =====================================================
-
+    // ARENA AND CRYSTAL
     private ArenaBounds _arenaBounds = null!;
 
     private readonly List<(
@@ -59,49 +50,39 @@ internal sealed class CrystalDefenseWindow : Application
     private GameState _gameState = null!;
     private CrystalHealthBar _crystalHealthBar = null!;
 
-    // =====================================================
-    // SARAH - PLAYER AND PROJECTILES
-    // =====================================================
-
-    private Mesh[] _knightParts = null!;   // body, right leg, left leg, right arm, left arm, cape
+    // PLAYER - SARAH
+    private Mesh[] _knightParts = null!;
     private Material _knightMaterial = null!;
     private Mesh _projectileMesh = null!;
     private Material _projectileMaterial = null!;
 
     private Player _player = null!;
-    private ProjectileManager _projectiles = null!;
     private OrbitCamera _orbitCamera = null!;
+    private ProjectileManager _projectiles = null!;
     private readonly PlayerInput _input = new();
 
-    // =====================================================
-    // ONS - ENEMIES AND COLLISIONS
-    // =====================================================
-
+    // ENEMIES - ONS
     private Mesh _enemyMesh = null!;
     private Material _enemyMaterial = null!;
     private EnemySpawner _enemySpawner = null!;
     private EnemyWaveManager _enemyWaveManager = null!;
     private CollisionSystem _collisionSystem = null!;
 
-    // =====================================================
-    // SARAH - GAME FLOW AND INTERFACE
-    // =====================================================
+    private CrystalGolemRenderer? _golemRenderer;
+    private Dictionary<int, Material>? _golemMaterials;
 
+    // GAME FLOW AND UI - SARAH
     private UiRenderer _uiRenderer = null!;
     private GameUi _gameUi = null!;
     private readonly Random _random = new();
 
     private GameScreen _screen = GameScreen.MainMenu;
-    private float _screenTime;            // seconds since the current screen was opened (blinking texts)
-    private float _waveTime;              // seconds played since the current wave started (wave banner, tips)
+    private float _screenTime;
+    private float _waveTime;
     private int _score;
     private int _kills;
     private Upgrade[] _upgradeChoices = Array.Empty<Upgrade>();
     private int _selectedUpgrade;
-
-    // =====================================================
-    // CONSTRUCTOR
-    // =====================================================
 
     public CrystalDefenseWindow(
         GameWindowSettings gameSettings,
@@ -109,10 +90,6 @@ internal sealed class CrystalDefenseWindow : Application
     ) : base(gameSettings, windowSettings)
     {
     }
-
-    // =====================================================
-    // INITIALIZE: load everything once
-    // =====================================================
 
     protected override void Initialize()
     {
@@ -124,25 +101,22 @@ internal sealed class CrystalDefenseWindow : Application
         _uiRenderer = new UiRenderer();
         _gameUi = new GameUi(_uiRenderer);
 
-        // Camera
+        // CAMERA
         _camera = new Camera(
-            new Vector3(0.0f, 18.0f, 16.0f),
-            new Vector3(0.0f, 0.0f, 1.0f)
+            new Vector3(0.0f, 28.0f, 22.0f),
+            Vector3.Zero
         );
 
-        // Lighting
+        // LIGHTING
         _renderer.DirectionalLight = new DirectionalLight
         {
             Direction = new Vector3(-1.0f, 1.7f, 1.0f),
             AmbientColor = new Vector3(0.3f, 0.3f, 0.3f),
-            DiffuseColor = new Vector3(1.0f, 1.0f, 1.0f),
-            SpecularColor = new Vector3(1.0f, 1.0f, 1.0f)
+            DiffuseColor = Vector3.One,
+            SpecularColor = Vector3.One
         };
 
-        // =================================================
-        // MANUELA - ARENA
-        // =================================================
-
+        // ARENA
         _arenaBounds = new ArenaBounds(
             new Vector2(0.0f, 0.0f),
             11.5f
@@ -172,10 +146,7 @@ internal sealed class CrystalDefenseWindow : Application
             490.0f
         );
 
-        // =================================================
-        // MANUELA - CRYSTAL
-        // =================================================
-
+        // CRYSTAL
         string arenaDirectory = Path.Combine(
             AppContext.BaseDirectory,
             "Assets",
@@ -195,7 +166,7 @@ internal sealed class CrystalDefenseWindow : Application
             );
         }
 
-        Mesh crystalMesh = Keep(
+        _crystalMesh = Keep(
             new Mesh(ObjLoader.Load(crystalPath))
         );
 
@@ -212,33 +183,21 @@ internal sealed class CrystalDefenseWindow : Application
             );
         }
 
-        var crystalMaterial =
-            new AmbientDiffuseSpecularMaterial(
-                Keep(Texture.FromFile(crystalTexturePath))
-            )
-            {
-                Shininess = 562.5f
-            };
+        _crystalMaterial = new AmbientDiffuseSpecularMaterial(
+            Keep(Texture.FromFile(crystalTexturePath))
+        )
+        {
+            Shininess = 562.5f
+        };
 
-        _crystalMesh = crystalMesh;
-        _crystalMaterial = crystalMaterial;
-
-        // =================================================
-        // SARAH - KNIGHT AND PROJECTILES
-        // =================================================
-
-        // Knight modelled in Blender (source: Blender/knight.blend), made of six parts that are
-        // animated as a scene graph (see KnightModel). All parts share one UV atlas with two textures
-        // baked in Blender: the colours (worn metal, striped cloth, leather...) and a normal map for
-        // the small reliefs (scratches, hammered metal, woven cloth), drawn with normal mapping.
-        _knightMaterial =
-            new NormalMappingMaterial(
-                Keep(LoadTexture("knight_color.png")),
-                Keep(LoadTexture("knight_normal.png"))
-            )
-            {
-                Shininess = 40.0f
-            };
+        // KNIGHT - SARAH
+        _knightMaterial = new NormalMappingMaterial(
+            Keep(LoadTexture("knight_color.png")),
+            Keep(LoadTexture("knight_normal.png"))
+        )
+        {
+            Shininess = 40.0f
+        };
 
         _knightParts = new[]
         {
@@ -247,56 +206,89 @@ internal sealed class CrystalDefenseWindow : Application
             LoadKnightPart("knight_leg_left.obj"),
             LoadKnightPart("knight_arm_right.obj"),
             LoadKnightPart("knight_arm_left.obj"),
-            LoadKnightPart("knight_cape.obj"),
+            LoadKnightPart("knight_cape.obj")
         };
 
-        // Small low-poly energy orb modelled in Blender (source: Blender/projectile.blend).
-        // Unlit, so that it always looks bright.
-        _projectileMesh = Keep(
-            new Mesh(ObjLoader.Load(Path.Combine(
-                AppContext.BaseDirectory, "Assets", "projectile.obj")))
+        // PROJECTILES
+        string projectilePath = Path.Combine(
+            AppContext.BaseDirectory,
+            "Assets",
+            "projectile.obj"
         );
 
-        _projectileMaterial =
-            new UnlitTextureMaterial(
-                Keep(LoadTexture("projectile.png"))
+        _projectileMesh = Keep(
+            new Mesh(ObjLoader.Load(projectilePath))
+        );
+
+        _projectileMaterial = new UnlitTextureMaterial(
+            Keep(LoadTexture("projectile.png"))
+        );
+
+        // CRYSTAL GOLEM - ONS
+        string golemObjPath = Path.Combine(
+            AppContext.BaseDirectory,
+            "Assets",
+            "CrystalGolem_Animated.obj"
+        );
+
+        string glbPath = Path.Combine(
+            AppContext.BaseDirectory,
+            "Assets",
+            "Models",
+            "CrystalGolem.glb"
+        );
+
+        if (File.Exists(golemObjPath))
+        {
+            _enemyMesh = Keep(
+                new Mesh(ObjLoader.Load(golemObjPath))
+            );
+        }
+        else
+        {
+            _enemyMesh = Keep(
+                new Mesh(Primitives.CreateCube(1.0f))
+            );
+        }
+
+        _enemyMaterial = new AmbientDiffuseSpecularMaterial(
+            Keep(Texture.FromColor(120, 115, 135))
+        )
+        {
+            Shininess = 32.0f
+        };
+
+        if (File.Exists(glbPath))
+        {
+            var golemModel = CrystalGolemLoader.Load();
+
+            var golemParts =
+                CrystalGolemMeshLoader.LoadParts(glbPath);
+
+            _golemRenderer = Keep(
+                new CrystalGolemRenderer(golemParts)
             );
 
-        // =================================================
-        // ONS - ENEMIES
-        // =================================================
+            _golemMaterials =
+                CrystalGolemMaterialLoader.LoadMaterials(
+                    golemModel,
+                    texture => Keep(texture)
+                );
 
-        // Temporary cube model.
-        // The Crystal Golem will replace it later.
-        _enemyMesh = Keep(
-            new Mesh(Primitives.CreateCube(1.0f))
-        );
+            Console.WriteLine(
+                $"Crystal Golem loaded: {golemParts.Count} parts"
+            );
+        }
 
-        _enemyMaterial =
-            new AmbientDiffuseSpecularMaterial(
-                Keep(LoadTexture("player.png"))
-            )
-            {
-                Shininess = 32.0f
-            };
-
-        // A fresh game is ready behind the main menu.
         StartNewGame();
         ShowScreen(GameScreen.MainMenu);
 
-        Console.WriteLine(
-            "Crystal Defense initialized."
-        );
+        Console.WriteLine("Crystal Defense initialized.");
     }
 
-    // =====================================================
-    // SARAH - START A NEW GAME (also used by "play again")
-    // =====================================================
-
-    // Creates everything that changes during a game; the loaded models are reused.
+    // START OR RESTART GAME
     private void StartNewGame()
     {
-        // Manuela - crystal and game state.
         _crystal = new CrystalEntity(
             _crystalMesh,
             _crystalMaterial,
@@ -306,10 +298,13 @@ internal sealed class CrystalDefenseWindow : Application
 
         _gameState = new GameState();
 
-        // Sarah - knight, projectiles and camera.
         var knightModel = new KnightModel(
-            _knightParts[0], _knightParts[1], _knightParts[2],
-            _knightParts[3], _knightParts[4], _knightParts[5],
+            _knightParts[0],
+            _knightParts[1],
+            _knightParts[2],
+            _knightParts[3],
+            _knightParts[4],
+            _knightParts[5],
             _knightMaterial
         );
 
@@ -321,7 +316,7 @@ internal sealed class CrystalDefenseWindow : Application
             radius: 0.6f
         )
         {
-            Scale = 1.2f   // the model is about 1.9 high in Blender: about 2.3 in the game
+            Scale = 1.2f
         };
 
         _projectiles = new ProjectileManager(
@@ -329,7 +324,6 @@ internal sealed class CrystalDefenseWindow : Application
             _projectileMaterial
         )
         {
-            // Middle height of the enemies (they are 1 unit high, standing on the floor).
             ShootingHeight = 0.6f
         };
 
@@ -338,15 +332,21 @@ internal sealed class CrystalDefenseWindow : Application
             _player.Position
         );
 
-        // Ons - enemies, collisions and waves.
         _enemySpawner = new EnemySpawner(
             _enemyMesh,
             _enemyMaterial
         );
 
+        if (_golemRenderer != null && _golemMaterials != null)
+        {
+            _enemySpawner.SetGolemRenderer(
+                _golemRenderer,
+                _golemMaterials
+            );
+        }
+
         _collisionSystem = new CollisionSystem();
 
-        // The next wave starts only after the upgrade choice (see UpdatePlaying / ChooseUpgrade).
         _enemyWaveManager = new EnemyWaveManager(
             _enemySpawner
         )
@@ -367,10 +367,7 @@ internal sealed class CrystalDefenseWindow : Application
         _screenTime = 0.0f;
     }
 
-    // =====================================================
     // LOAD ARENA OBJECT
-    // =====================================================
-
     private void LoadArenaObject(
         string fileName,
         string textureName,
@@ -413,28 +410,19 @@ internal sealed class CrystalDefenseWindow : Application
             );
         }
 
-        var material =
-            new AmbientDiffuseSpecularMaterial(
-                Keep(Texture.FromFile(texturePath))
-            )
-            {
-                Shininess = shininess
-            };
+        var material = new AmbientDiffuseSpecularMaterial(
+            Keep(Texture.FromFile(texturePath))
+        )
+        {
+            Shininess = shininess
+        };
 
         _arenaObjects.Add((
             mesh,
             material,
             Matrix4.Identity
         ));
-
-        Console.WriteLine(
-            $"Arena object loaded: {fileName}"
-        );
     }
-
-    // =====================================================
-    // RESIZE
-    // =====================================================
 
     protected override void FramebufferResized(
         int width,
@@ -444,10 +432,7 @@ internal sealed class CrystalDefenseWindow : Application
         _renderer.Resize(width, height);
     }
 
-    // =====================================================
-    // UPDATE: depends on the current screen
-    // =====================================================
-
+    // UPDATE GAME
     protected override void Update(float deltaTime)
     {
         _screenTime += deltaTime;
@@ -457,15 +442,19 @@ internal sealed class CrystalDefenseWindow : Application
             case GameScreen.MainMenu:
                 UpdateMainMenu(deltaTime);
                 break;
+
             case GameScreen.Playing:
                 UpdatePlaying(deltaTime);
                 break;
+
             case GameScreen.Paused:
                 UpdatePaused(deltaTime);
                 break;
+
             case GameScreen.ChoosingUpgrade:
                 UpdateUpgradeChoice(deltaTime);
                 break;
+
             case GameScreen.Victory:
             case GameScreen.Defeat:
                 UpdateEndScreen(deltaTime);
@@ -481,23 +470,27 @@ internal sealed class CrystalDefenseWindow : Application
             return;
         }
 
-        if (KeyboardState.IsKeyPressed(Keys.Enter) ||
+        if (
+            KeyboardState.IsKeyPressed(Keys.Enter) ||
             KeyboardState.IsKeyPressed(Keys.KeyPadEnter) ||
             KeyboardState.IsKeyPressed(Keys.Space) ||
-            MouseState.IsButtonPressed(MouseButton.Left))
+            MouseState.IsButtonPressed(MouseButton.Left)
+        )
         {
             ShowScreen(GameScreen.Playing);
             return;
         }
 
-        // The camera turns slowly around the knight behind the menu.
         _orbitCamera.Rotate(deltaTime * 0.15f);
         UpdateCamera(deltaTime);
     }
 
     private void UpdatePaused(float deltaTime)
     {
-        if (KeyboardState.IsKeyPressed(Keys.Escape) || KeyboardState.IsKeyPressed(Keys.P))
+        if (
+            KeyboardState.IsKeyPressed(Keys.Escape) ||
+            KeyboardState.IsKeyPressed(Keys.P)
+        )
         {
             ShowScreen(GameScreen.Playing);
             return;
@@ -512,10 +505,12 @@ internal sealed class CrystalDefenseWindow : Application
 
     private void UpdateEndScreen(float deltaTime)
     {
-        // A short delay, so that a key held during the last fight does not skip this screen.
         if (_screenTime > 0.8f)
         {
-            if (KeyboardState.IsKeyPressed(Keys.Enter) || KeyboardState.IsKeyPressed(Keys.KeyPadEnter))
+            if (
+                KeyboardState.IsKeyPressed(Keys.Enter) ||
+                KeyboardState.IsKeyPressed(Keys.KeyPadEnter)
+            )
             {
                 StartNewGame();
                 ShowScreen(GameScreen.Playing);
@@ -534,9 +529,13 @@ internal sealed class CrystalDefenseWindow : Application
         UpdateCamera(deltaTime);
     }
 
+    // MAIN GAMEPLAY
     private void UpdatePlaying(float deltaTime)
     {
-        if (KeyboardState.IsKeyPressed(Keys.Escape) || KeyboardState.IsKeyPressed(Keys.P))
+        if (
+            KeyboardState.IsKeyPressed(Keys.Escape) ||
+            KeyboardState.IsKeyPressed(Keys.P)
+        )
         {
             ShowScreen(GameScreen.Paused);
             return;
@@ -544,11 +543,7 @@ internal sealed class CrystalDefenseWindow : Application
 
         _waveTime += deltaTime;
 
-        // =================================================
-        // SARAH - PLAYER
-        // =================================================
-
-        // Keyboard only or keyboard + mouse: PlayerInput turns the keys and the mouse into actions.
+        // PLAYER INPUT
         _input.Read(
             KeyboardState,
             MouseState,
@@ -560,6 +555,7 @@ internal sealed class CrystalDefenseWindow : Application
             deltaTime
         );
 
+        // PLAYER MOVEMENT
         _player.Update(
             _input,
             deltaTime,
@@ -568,10 +564,7 @@ internal sealed class CrystalDefenseWindow : Application
             _crystal.Radius
         );
 
-        // =================================================
-        // SARAH - PROJECTILES
-        // =================================================
-
+        // PROJECTILES
         _projectiles.Update(
             _input.IsShooting,
             deltaTime,
@@ -579,92 +572,59 @@ internal sealed class CrystalDefenseWindow : Application
             _arenaBounds
         );
 
-        // =================================================
-        // ONS - ENEMY WAVES
-        // =================================================
-
-        // Manage the current wave.
+        // ENEMY WAVES
         _enemyWaveManager.Update(deltaTime);
 
-        // =================================================
-        // ONS - ENEMY MOVEMENT
-        // =================================================
-
-        // Enemies move toward the crystal.
-        // Different spawn positions and speeds.
-        // Separation is handled inside EnemySpawner.
+        // ENEMY MOVEMENT
         _enemySpawner.Update(
             deltaTime,
             _crystal.Position,
             _crystal.Radius
         );
 
-        // =================================================
-        // ONS - PROJECTILE COLLISIONS
-        // =================================================
-
+        // PROJECTILE COLLISIONS
         _collisionSystem.CheckProjectileEnemyCollisions(
             _enemySpawner.Enemies,
             _projectiles.Projectiles
         );
 
-        // =================================================
-        // ONS - CRYSTAL COLLISIONS
-        // =================================================
-
-        // Each enemy attacks every 3 seconds.
-        // Enemies stay alive until defeated.
+        // CRYSTAL COLLISIONS
         _collisionSystem.CheckEnemyCrystalCollisions(
             _enemySpawner.Enemies,
             _crystal,
             deltaTime
         );
 
-        // =================================================
-        // SARAH - SWORD AND DAMAGE TO THE PLAYER
-        // =================================================
-
+        // SWORD COLLISIONS
         _collisionSystem.CheckSwordEnemyCollisions(
             _player,
             _enemySpawner.Enemies
         );
 
+        // ENEMY-PLAYER COLLISIONS
         _collisionSystem.CheckEnemyPlayerCollisions(
             _enemySpawner.Enemies,
             _player
         );
 
-        // =================================================
-        // SARAH - SCORE (before the defeated enemies are removed)
-        // =================================================
-
+        // SCORE AND DEAD ENEMIES
         CountDefeatedEnemies();
-
-        // Remove defeated enemies.
         _enemySpawner.RemoveDeadEnemies();
 
-        // =================================================
-        // SARAH - CAMERA
-        // =================================================
-
+        // CAMERA
         if (_player.WasHitThisFrame)
+        {
             _orbitCamera.Shake(0.35f);
+        }
 
         UpdateCamera(deltaTime);
 
-        // =================================================
-        // MANUELA - GAME STATE
-        // =================================================
-
+        // GAME STATE
         _gameState.Update(
             _crystal,
             allWavesCompleted:
                 _enemyWaveManager.AllWavesCompleted
         );
-
-        // =================================================
-        // SARAH - END OF THE GAME OR END OF A WAVE
-        // =================================================
 
         if (_gameState.Status == GameStatus.Defeat)
         {
@@ -672,21 +632,17 @@ internal sealed class CrystalDefenseWindow : Application
         }
         else if (_gameState.Status == GameStatus.Victory)
         {
-            _score += (int)_crystal.Health * 10;   // bonus for the health left in the crystal
+            _score += (int)_crystal.Health * 10;
             ShowScreen(GameScreen.Victory);
         }
         else if (_enemyWaveManager.IsCurrentWaveCleared)
         {
-            _score += 100 * _enemyWaveManager.CurrentWave;   // bonus for each finished wave
+            _score += 100 * _enemyWaveManager.CurrentWave;
             OfferUpgrades();
         }
     }
 
-    // =====================================================
-    // SARAH - SCORE AND UPGRADES
-    // =====================================================
-
-    // Every enemy defeated in this frame gives points; later waves give more.
+    // SCORE
     private void CountDefeatedEnemies()
     {
         foreach (Enemy enemy in _enemySpawner.Enemies)
@@ -694,21 +650,31 @@ internal sealed class CrystalDefenseWindow : Application
             if (!enemy.IsAlive)
             {
                 _kills++;
-                _score += 10 * Math.Max(1, _enemyWaveManager.CurrentWave) * (enemy.IsBoss ? 5 : 1);
+
+                _score +=
+                    10 *
+                    Math.Max(1, _enemyWaveManager.CurrentWave) *
+                    (enemy.IsBoss ? 5 : 1);
             }
         }
     }
 
-    private UpgradeTargets CurrentUpgradeTargets => new(_player, _projectiles, _crystal);
+    // UPGRADES
+    private UpgradeTargets CurrentUpgradeTargets =>
+        new(_player, _projectiles, _crystal);
 
     private void OfferUpgrades()
     {
-        _upgradeChoices = UpgradeCatalog.PickThree(CurrentUpgradeTargets, _random);
+        _upgradeChoices = UpgradeCatalog.PickThree(
+            CurrentUpgradeTargets,
+            _random
+        );
+
         _selectedUpgrade = 0;
 
         if (_upgradeChoices.Length == 0)
         {
-            _enemyWaveManager.StartNextWaveNow();   // nothing to offer: go on directly
+            _enemyWaveManager.StartNextWaveNow();
             return;
         }
 
@@ -719,40 +685,68 @@ internal sealed class CrystalDefenseWindow : Application
     {
         int count = _upgradeChoices.Length;
 
-        // keyboard: 1, 2, 3 choose directly; left / right + Enter
         for (int i = 0; i < count; i++)
         {
-            if (KeyboardState.IsKeyPressed(Keys.D1 + i) || KeyboardState.IsKeyPressed(Keys.KeyPad1 + i))
+            if (
+                KeyboardState.IsKeyPressed(Keys.D1 + i) ||
+                KeyboardState.IsKeyPressed(Keys.KeyPad1 + i)
+            )
             {
                 ChooseUpgrade(i);
                 return;
             }
         }
 
-        if (KeyboardState.IsKeyPressed(Keys.Left) || KeyboardState.IsKeyPressed(Keys.A))
-            _selectedUpgrade = (_selectedUpgrade + count - 1) % count;
-        if (KeyboardState.IsKeyPressed(Keys.Right) || KeyboardState.IsKeyPressed(Keys.D))
-            _selectedUpgrade = (_selectedUpgrade + 1) % count;
+        if (
+            KeyboardState.IsKeyPressed(Keys.Left) ||
+            KeyboardState.IsKeyPressed(Keys.A)
+        )
+        {
+            _selectedUpgrade =
+                (_selectedUpgrade + count - 1) % count;
+        }
 
-        // a short delay, so that Enter (sword) or a click held during the fight does not choose by accident
+        if (
+            KeyboardState.IsKeyPressed(Keys.Right) ||
+            KeyboardState.IsKeyPressed(Keys.D)
+        )
+        {
+            _selectedUpgrade =
+                (_selectedUpgrade + 1) % count;
+        }
+
         bool canConfirm = _screenTime > 0.4f;
-        if (canConfirm && (KeyboardState.IsKeyPressed(Keys.Enter) || KeyboardState.IsKeyPressed(Keys.KeyPadEnter)))
+
+        if (
+            canConfirm &&
+            (
+                KeyboardState.IsKeyPressed(Keys.Enter) ||
+                KeyboardState.IsKeyPressed(Keys.KeyPadEnter)
+            )
+        )
         {
             ChooseUpgrade(_selectedUpgrade);
             return;
         }
 
-        // mouse: hovering selects a card, clicking chooses it
         UiRect[] cards = _gameUi.GetUpgradeCardRects(count);
+
         for (int i = 0; i < count; i++)
         {
             if (!cards[i].Contains(MouseState.Position))
+            {
                 continue;
+            }
 
             if (MouseState.Delta.LengthSquared > 0.0f)
+            {
                 _selectedUpgrade = i;
+            }
 
-            if (canConfirm && MouseState.IsButtonPressed(MouseButton.Left))
+            if (
+                canConfirm &&
+                MouseState.IsButtonPressed(MouseButton.Left)
+            )
             {
                 ChooseUpgrade(i);
                 return;
@@ -765,11 +759,17 @@ internal sealed class CrystalDefenseWindow : Application
     private void ChooseUpgrade(int index)
     {
         Upgrade upgrade = _upgradeChoices[index];
+
         upgrade.Apply(CurrentUpgradeTargets);
-        Console.WriteLine($"Upgrade chosen: {upgrade.Title}");
+
+        Console.WriteLine(
+            $"Upgrade chosen: {upgrade.Title}"
+        );
 
         _enemyWaveManager.StartNextWaveNow();
+
         _waveTime = 0.0f;
+
         ShowScreen(GameScreen.Playing);
     }
 
@@ -783,18 +783,12 @@ internal sealed class CrystalDefenseWindow : Application
         );
     }
 
-    // =====================================================
-    // RENDER: the 3D scene, then the interface of the current screen
-    // =====================================================
-
+    // RENDER
     protected override void Render()
     {
         _renderer.Clear();
 
-        // =================================================
-        // MANUELA - ARENA
-        // =================================================
-
+        // ARENA
         foreach (var arenaObject in _arenaObjects)
         {
             _renderer.Draw(
@@ -805,47 +799,25 @@ internal sealed class CrystalDefenseWindow : Application
             );
         }
 
-        // =================================================
-        // MANUELA - CRYSTAL
-        // =================================================
+        // CRYSTAL
+        _crystal.Draw(_renderer, _camera);
 
-        _crystal.Draw(
-            _renderer,
-            _camera
-        );
+        // PLAYER
+        _player.Draw(_renderer, _camera);
 
-        // =================================================
-        // SARAH - PLAYER
-        // =================================================
+        // PROJECTILES
+        _projectiles.Draw(_renderer, _camera);
 
-        _player.Draw(
-            _renderer,
-            _camera
-        );
+        // ENEMIES
+        _enemySpawner.Draw(_renderer, _camera);
 
-        // =================================================
-        // SARAH - PROJECTILES
-        // =================================================
+        bool inGame =
+            _screen is
+                GameScreen.Playing or
+                GameScreen.Paused or
+                GameScreen.ChoosingUpgrade;
 
-        _projectiles.Draw(
-            _renderer,
-            _camera
-        );
-
-        // =================================================
-        // ONS - ENEMIES
-        // =================================================
-
-        _enemySpawner.Draw(
-            _renderer,
-            _camera
-        );
-
-        // =================================================
-        // MANUELA - CRYSTAL HEALTH BAR (during the game only)
-        // =================================================
-
-        bool inGame = _screen is GameScreen.Playing or GameScreen.Paused or GameScreen.ChoosingUpgrade;
+        // CRYSTAL HEALTH BAR
         if (inGame)
         {
             _crystalHealthBar.Draw(
@@ -853,29 +825,41 @@ internal sealed class CrystalDefenseWindow : Application
             );
         }
 
-        // =================================================
-        // SARAH - INTERFACE
-        // =================================================
-
+        // UI
         _uiRenderer.Begin(ClientSize);
 
         if (inGame)
+        {
             _gameUi.DrawHud(CurrentHudInfo());
+        }
 
         if (_screen == GameScreen.Playing)
-            _gameUi.DrawWaveStart(_enemyWaveManager.CurrentWave, _waveTime, _input.Mode == PlayerInput.AimMode.Mouse);
+        {
+            _gameUi.DrawWaveStart(
+                _enemyWaveManager.CurrentWave,
+                _waveTime,
+                _input.Mode == PlayerInput.AimMode.Mouse
+            );
+        }
 
         switch (_screen)
         {
             case GameScreen.MainMenu:
                 _gameUi.DrawMainMenu(_screenTime);
                 break;
+
             case GameScreen.Paused:
                 _gameUi.DrawPause();
                 break;
+
             case GameScreen.ChoosingUpgrade:
-                _gameUi.DrawUpgradeChoice(_enemyWaveManager.CurrentWave, _upgradeChoices, _selectedUpgrade);
+                _gameUi.DrawUpgradeChoice(
+                    _enemyWaveManager.CurrentWave,
+                    _upgradeChoices,
+                    _selectedUpgrade
+                );
                 break;
+
             case GameScreen.Victory:
             case GameScreen.Defeat:
                 _gameUi.DrawEndScreen(
@@ -883,20 +867,25 @@ internal sealed class CrystalDefenseWindow : Application
                     _score,
                     _enemyWaveManager.CurrentWave,
                     _enemyWaveManager.TotalWaveCount,
-                    _kills);
+                    _kills
+                );
                 break;
         }
 
         _uiRenderer.End();
     }
 
+    // HUD
     private HudInfo CurrentHudInfo()
     {
         int alive = 0;
+
         foreach (Enemy enemy in _enemySpawner.Enemies)
         {
             if (enemy.IsAlive)
+            {
                 alive++;
+            }
         }
 
         return new HudInfo(
@@ -908,13 +897,11 @@ internal sealed class CrystalDefenseWindow : Application
             _enemyWaveManager.TotalWaveCount,
             _score,
             alive,
-            _input.Mode == PlayerInput.AimMode.Mouse);
+            _input.Mode == PlayerInput.AimMode.Mouse
+        );
     }
 
-    // =====================================================
     // SHUTDOWN
-    // =====================================================
-
     protected override void Shutdown()
     {
         foreach (IDisposable resource in _resources)
@@ -927,21 +914,20 @@ internal sealed class CrystalDefenseWindow : Application
         _renderer.Dispose();
     }
 
-    // =====================================================
-    // SARAH - HELPERS
-    // =====================================================
+    // HELPERS
+    private Mesh LoadKnightPart(string fileName)
+    {
+        string path = Path.Combine(
+            AppContext.BaseDirectory,
+            "Assets",
+            "Knight",
+            fileName
+        );
 
-    private Mesh LoadKnightPart(string fileName) =>
-        Keep(new Mesh(ObjLoader.Load(Path.Combine(
-            AppContext.BaseDirectory, "Assets", "Knight", fileName))));
+        return Keep(new Mesh(ObjLoader.Load(path)));
+    }
 
-    // =====================================================
-    // TEXTURES
-    // =====================================================
-
-    private static Texture LoadTexture(
-        string fileName
-    )
+    private static Texture LoadTexture(string fileName)
     {
         string texturePath = Path.Combine(
             AppContext.BaseDirectory,
@@ -959,10 +945,6 @@ internal sealed class CrystalDefenseWindow : Application
 
         return Texture.FromFile(texturePath);
     }
-
-    // =====================================================
-    // RESOURCE MANAGEMENT
-    // =====================================================
 
     private T Keep<T>(T resource)
         where T : IDisposable

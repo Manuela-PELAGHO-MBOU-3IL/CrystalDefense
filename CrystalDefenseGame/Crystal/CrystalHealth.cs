@@ -11,6 +11,7 @@ public class CrystalHealth
 
     public bool IsDestroyed => CurrentHealth <= 0;
 
+
     public CrystalHealth(int maxHealth = 100)
     {
         if (maxHealth <= 0)
