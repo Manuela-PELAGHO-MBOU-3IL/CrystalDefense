@@ -1,21 +1,17 @@
+
 #version 330 core
 
 uniform sampler2D uTexture;
 uniform mat4 uModel;
 
-// directional light, set by the renderer (DirectionalLight)
-uniform vec3 uLightDirection;      // from the surface towards the light, normalized
+uniform vec3 uLightDirection;
 uniform vec3 uLightAmbientColor;
 uniform vec3 uLightDiffuseColor;
 uniform vec3 uLightSpecularColor;
 
-// camera position in world space, set by the renderer
 uniform vec3 uCameraPosition;
-
-// shininess exponent of the material
 uniform float uShininess;
 
-// input from the vertex shader
 in vec2 uv;
 in vec3 fragNormal;
 in vec3 fragPosition;
@@ -24,27 +20,62 @@ out vec4 outColor;
 
 void main()
 {
-    // rotation (and scale) of the model matrix, to bring the normal into world space
-    mat3 normalMatrix = mat3(uModel);
-    vec3 normal = normalize(fragNormal * normalMatrix);
+    // Correct normal transformation
+    mat3 normalMatrix =
+        transpose(inverse(mat3(uModel)));
 
-    // surface color from the texture
-    vec3 surfaceColor = texture(uTexture, uv).rgb;
+    vec3 normal = normalize(
+        normalMatrix * fragNormal
+    );
 
-    // diffuse: Lambert's cosine law, no light from behind
-    float brightness = max(dot(normal, uLightDirection), 0.0);
+    // Material color
+    vec4 texColor = texture(uTexture, uv);
+    vec3 surfaceColor = texColor.rgb;
 
-    // specular (Blinn): halfway vector between light direction and view direction
-    vec3 v = normalize(uCameraPosition - fragPosition);
-    vec3 h = normalize(uLightDirection + v);
-    float ndoth = max(dot(normal, h), 0.0);
-    // multiplied with the diffuse brightness: no highlight on surfaces facing away from the light,
-    // and the highlight fades out softly towards the shadow side
-    float specularIntensity = pow(ndoth, uShininess) * brightness;
+    // Directional lighting
+    vec3 lightDirection =
+        normalize(uLightDirection);
 
-    // ambient + diffuse are multiplied with the surface color, the highlight is added on top
-    vec3 color = surfaceColor * (uLightAmbientColor + brightness * uLightDiffuseColor)
-               + specularIntensity * uLightSpecularColor;
+    float brightness = max(
+        dot(normal, lightDirection),
+        0.0
+    );
 
-    outColor = vec4(color, 1.0);
+    // View direction
+    vec3 viewDirection = normalize(
+        uCameraPosition - fragPosition
+    );
+
+    // Blinn-Phong specular lighting
+    vec3 halfwayDirection = normalize(
+        lightDirection + viewDirection
+    );
+
+    float specularIntensity = pow(
+        max(dot(normal, halfwayDirection), 0.0),
+        uShininess
+    ) * brightness;
+
+    // Ambient lighting
+    vec3 ambient =
+        surfaceColor * uLightAmbientColor;
+
+    // Diffuse lighting
+    vec3 diffuse =
+        surfaceColor *
+        brightness *
+        uLightDiffuseColor;
+
+    // Specular lighting
+    vec3 specular =
+        specularIntensity *
+        uLightSpecularColor;
+
+    vec3 finalColor =
+        ambient + diffuse + specular;
+
+    outColor = vec4(
+        finalColor,
+        texColor.a
+    );
 }
